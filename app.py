@@ -265,4 +265,7 @@ if __name__ == "__main__":
         print("Error: No credentials set in config.json!")
         exit(1)
     parse_m3u()
-    app.run(host="0.0.0.0", port=8080, debug=False)
+    port = \
+        int(CONFIG['base_url'].split(":")[-1]) \
+        if ":" in CONFIG['base_url'] else 8080
+    app.run(host="0.0.0.0", port=port, debug=False)
