@@ -1,0 +1,24 @@
+{
+    "base_url": "http://192.168.0.8:8080",
+    "file": "alix-full.m3u",
+    "credentials": [
+        {
+            "username": "",
+            "password": ""
+        }
+    ],
+    "whitelisted_grups": ["VOD | SPAIN"],
+    "blacklisted_grup_prefixes": [
+        "XXX", "PL ", "ARAB", "AFR", "ASIA |", "DE |", "TR |",
+        "NL |", "PT |", "FR |", "NAME | CA", "NAME | USA",
+        "EURO |", "VOD |", "UK", "ES | TOROS", "USA", "US |",
+        "ES | MAX AMAZON", "PPV", "TH |", "JP |", "KR |",
+        "HULU | 2025", "DK |", "CH |", "CA |", "BE |", "AU |",
+        "KU |", "GR |", "FI |", "CZ |", "SE |", "MY |", "IN |",
+        "NO |", "RO |", "RU |", "LT |", "IT |", "SKIN |", "PH |",
+        "PK |", "PA |", "ID |", "KO |", "FR  |", "FA |", "MR |",
+        "MAGHREB", "AF |", "AL |", "ALB |", "AMAZIGH", "AR |",
+        "BG |", "BR |", "CN |", "DE |",
+        "EU |", "EXYU", "EX-YU"
+    ]
+}
