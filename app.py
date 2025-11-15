@@ -47,7 +47,7 @@ def parse_m3u():
                 "name": name,
                 "category_id": group,
                 # Wrong movie icons on m3u, let the client handle it
-                # "stream_icon": logo,
+                "stream_icon": None,
                 "direct_source": url,
                 "added": int(time.time()),
             }
