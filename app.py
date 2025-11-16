@@ -87,6 +87,8 @@ def text_to_filename(text):
 def retrieve_logos():
     for live_stream in CONFIG['live_streams']:
         logo_url = live_stream.get("stream_icon", "")
+        if logo_url.startswith(CONFIG['base_url']):
+            continue
         name = live_stream.get("name", "Unknown")
         filename = generate_channel_logo(name, logo_url)
         live_stream["stream_icon"] = f"{CONFIG['base_url']}/logos/{filename}"
@@ -322,8 +324,8 @@ if __name__ == "__main__":
 
     if not load_stream_data():
         parse_from_endpoint()
-        save_stream_data()
     retrieve_logos()
+    save_stream_data()
 
     port = \
         int(CONFIG['base_url'].split(":")[-1]) \
