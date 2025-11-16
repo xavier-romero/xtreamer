@@ -5,81 +5,11 @@ import hashlib
 import os
 import re
 import json
-import time
 import sys
 
 
 CONFIG = {}
 app = Flask(__name__)
-
-
-def parse_m3u():
-    live_streams = []
-    movie_streams = []
-    live_categories_dict = {}
-    movie_categories_dict = {}
-
-    with open(CONFIG["file"], "r", encoding="utf-8") as f:
-        lines = f.readlines()
-
-    for i, line in enumerate(lines):
-        line = line.strip()
-        if line.startswith("#EXTINF:"):
-            name_match = re.search(r'tvg-name="([^"]+)"', line)
-            name = name_match.group(1) if name_match else "Unknown"
-            # id_match = re.search(r'tvg-id="([^"]+)"', line)
-            group_match = re.search(r'group-title="([^"]+)"', line)
-            group = group_match.group(1) if group_match else "Other"
-            logo_match = re.search(r'tvg-logo="([^"]+)"', line)
-            logo = logo_match.group(1) if logo_match else ""
-            url = lines[i + 1].strip() if i + 1 < len(lines) else None
-
-            if group not in CONFIG['whitelisted_grups']:
-                if any(
-                    group.startswith(prefix)
-                    for prefix in CONFIG['blacklisted_grup_prefixes']
-                ):
-                    continue
-
-            entry = {
-                "stream_id": i + 1,
-                "name": name,
-                "category_id": group,
-                # Wrong movie icons on m3u, let the client handle it
-                "stream_icon": None,
-                "direct_source": url,
-                "added": int(time.time()),
-            }
-            if '/movie/' in url:
-                entry["stream_type"] = "movie"
-                movie_streams.append(entry)
-                movie_categories_dict[group] = {
-                    "category_id": group, "category_name": group
-                }
-            else:
-                # Many live channels lack logos or point to dead URLs
-                logo_filename = generate_channel_logo(name, logo)
-                entry["stream_icon"] = \
-                    f"{CONFIG['base_url']}/logos/{logo_filename}"
-                entry["stream_type"] = "live"
-                entry["tv_archive"] = 0
-                live_streams.append(entry)
-                live_categories_dict[group] = {
-                    "category_id": group, "category_name": group
-                }
-
-    CONFIG["live_streams"] = live_streams
-    CONFIG["live_categories"] = list(live_categories_dict.values())
-    CONFIG["movie_streams"] = movie_streams
-    CONFIG["movie_categories"] = list(movie_categories_dict.values())
-    CONFIG["series_streams"] = []
-    CONFIG["series_categories"] = []
-    print(
-        f"Loaded {len(CONFIG['live_streams'])} live streams with "
-        f"{len(CONFIG['live_categories'])} categories and "
-        f"{len(CONFIG['movie_streams'])} movies with "
-        f"{len(CONFIG['movie_categories'])} categories from {CONFIG['file']}."
-    )
 
 
 def parse_from_endpoint():
@@ -342,6 +272,38 @@ def logos(filename):
         return send_from_directory("logos", filename)
 
 
+def save_stream_data():
+    filename = CONFIG.get("json_save_path")
+    if not filename:
+        return
+
+    with open(filename, "w") as f:
+        json.dump({
+            "live_streams": CONFIG["live_streams"],
+            "movie_streams": CONFIG["movie_streams"],
+            "series_streams": CONFIG["series_streams"],
+            "live_categories": CONFIG["live_categories"],
+            "movie_categories": CONFIG["movie_categories"],
+            "series_categories": CONFIG["series_categories"],
+        }, f, indent=4)
+
+
+def load_stream_data():
+    filename = CONFIG.get("json_save_path")
+    if not filename or not os.path.exists(filename):
+        return False
+
+    with open(filename) as f:
+        data = json.load(f)
+        CONFIG["live_streams"] = data.get("live_streams", [])
+        CONFIG["movie_streams"] = data.get("movie_streams", [])
+        CONFIG["series_streams"] = data.get("series_streams", [])
+        CONFIG["live_categories"] = data.get("live_categories", [])
+        CONFIG["movie_categories"] = data.get("movie_categories", [])
+        CONFIG["series_categories"] = data.get("series_categories", [])
+    return True
+
+
 if __name__ == "__main__":
     config_file = sys.argv[1] if len(sys.argv) > 1 else "config.json"
     with open(config_file) as f:
@@ -358,16 +320,9 @@ if __name__ == "__main__":
         print("Error: No credentials set in config.json!")
         exit(1)
 
-    if CONFIG.get("endpoint"):
-        print("Parsing from endpoint...")
+    if not load_stream_data():
         parse_from_endpoint()
-    elif CONFIG.get("file"):
-        print("Parsing from M3U file...")
-        parse_m3u()
-    else:
-        print("Error: No valid source (file or endpoint) in config.json!")
-        exit(1)
-
+        save_stream_data()
     retrieve_logos()
 
     port = \
