@@ -154,12 +154,15 @@ def text_to_filename(text):
     return filename
 
 
-def generate_channel_logo(text, logo_url):
-    padding = 20
-    font_size = 48
-    text_color = (255, 255, 255)
-    bg_color = (30, 30, 30)
+def retrieve_logos():
+    for live_stream in CONFIG['live_streams']:
+        logo_url = live_stream.get("stream_icon", "")
+        name = live_stream.get("name", "Unknown")
+        filename = generate_channel_logo(name, logo_url)
+        live_stream["stream_icon"] = f"{CONFIG['base_url']}/logos/{filename}"
 
+
+def generate_channel_logo(text, logo_url):
     filename = text_to_filename(text)
 
     # if it already exists just return the path
@@ -169,20 +172,26 @@ def generate_channel_logo(text, logo_url):
         else:
             os.remove('./logos/' + filename)
 
-    try:
-        response = requests.get(logo_url, timeout=10)
-        if response.status_code == 200:
-            with open('./logos/' + filename, 'wb') as f:
-                f.write(response.content)
-            if os.path.getsize('./logos/' + filename) > 95:
-                return filename
-            else:
-                os.remove('./logos/' + filename)
-    except Exception as e:
-        print(f"Error downloading logo from {logo_url}: {e}")
-        print(f"Generating custom file {filename} instead.")
+    if logo_url and logo_url.startswith("http"):
+        try:
+            response = requests.get(logo_url, timeout=10)
+            if response.status_code == 200:
+                with open('./logos/' + filename, 'wb') as f:
+                    f.write(response.content)
+                if os.path.getsize('./logos/' + filename) > 95:
+                    return filename
+                else:
+                    os.remove('./logos/' + filename)
+        except Exception as e:
+            print(f"Error downloading logo from {logo_url}: {e}")
+            print(f"Generating custom file {filename} instead.")
 
-    # Fuente: si no tienes TTF, usa la default
+    # Reached that point, we're creating a custom image
+    padding = 20
+    font_size = 48
+    text_color = (255, 255, 255)
+    bg_color = (30, 30, 30)
+
     try:
         font = ImageFont.truetype("arial.ttf", font_size)
     except Exception:
@@ -320,7 +329,7 @@ def xmltv():
 
 @app.route("/logos/<path:filename>")
 def logos(filename):
-    if not re.match(r"^[a-f0-9]{32}\.png$", filename):
+    if not re.match(r"^[a-f0-9]{32}\.[a-z]{3,4}$", filename):
         return "400 Invalid filename", 400
     else:
         return send_from_directory("logos", filename)
@@ -351,6 +360,8 @@ if __name__ == "__main__":
     else:
         print("Error: No valid source (file or endpoint) in config.json!")
         exit(1)
+
+    retrieve_logos()
 
     port = \
         int(CONFIG['base_url'].split(":")[-1]) \
