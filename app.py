@@ -6,11 +6,10 @@ import os
 import re
 import json
 import time
+import sys
 
 
-with open("config.json") as f:
-    CONFIG = json.load(f)
-
+CONFIG = {}
 app = Flask(__name__)
 
 
@@ -80,6 +79,60 @@ def parse_m3u():
         f"{len(CONFIG['live_categories'])} categories and "
         f"{len(CONFIG['movie_streams'])} movies with "
         f"{len(CONFIG['movie_categories'])} categories from {CONFIG['file']}."
+    )
+
+
+def parse_from_endpoint():
+    ep_url = \
+        f"{CONFIG['endpoint']['host']}/player_api.php?" \
+        f"username={CONFIG['endpoint']['user']}&" \
+        f"password={CONFIG['endpoint']['pass']}&" \
+        "action="
+
+    def _fetch(url, action):
+        response = requests.get(url + action)
+        if response.status_code == 200:
+            return response.json()
+        return []
+
+    CONFIG["live_categories"] = [
+        cat for cat in _fetch(ep_url, "get_live_categories")
+        if cat["category_name"] in CONFIG['whitelisted_grups']
+        or not any(
+            cat["category_name"].startswith(prefix)
+            for prefix in CONFIG['blacklisted_grup_prefixes']
+        )
+    ]
+    CONFIG["live_streams"] = [
+        stream for stream in _fetch(ep_url, "get_live_streams")
+        if any(
+            stream["category_id"] == cat["category_id"]
+            for cat in CONFIG["live_categories"]
+        )
+    ]
+    CONFIG["movie_categories"] = [
+        cat for cat in _fetch(ep_url, "get_vod_categories")
+        if cat["category_name"] in CONFIG['whitelisted_grups']
+        or not any(
+            cat["category_name"].startswith(prefix)
+            for prefix in CONFIG['blacklisted_grup_prefixes']
+        )
+    ]
+    CONFIG["movie_streams"] = [
+        stream for stream in _fetch(ep_url, "get_vod_streams")
+        if any(
+            stream["category_id"] == cat["category_id"]
+            for cat in CONFIG["movie_categories"]
+        )
+    ]
+    CONFIG["series_streams"] = []
+    CONFIG["series_categories"] = []
+    print(
+        f"Loaded {len(CONFIG['live_streams'])} live streams with "
+        f"{len(CONFIG['live_categories'])} categories and "
+        f"{len(CONFIG['movie_streams'])} movies with "
+        f"{len(CONFIG['movie_categories'])} categories "
+        f"from {CONFIG['endpoint']}."
     )
 
 
@@ -259,13 +312,31 @@ def logos(filename):
 
 
 if __name__ == "__main__":
+    config_file = sys.argv[1] if len(sys.argv) > 1 else "config.json"
+    with open(config_file) as f:
+        CONFIG = json.load(f)
+
+    if not CONFIG:
+        print("Error: config.json is empty or invalid!")
+        exit(1)
+
     if CONFIG["credentials"] == [] or any(
         cred["username"] == "" or cred["password"] == ""
         for cred in CONFIG["credentials"]
     ):
         print("Error: No credentials set in config.json!")
         exit(1)
-    parse_m3u()
+
+    if CONFIG.get("endpoint"):
+        print("Parsing from endpoint...")
+        parse_from_endpoint()
+    elif CONFIG.get("file"):
+        print("Parsing from M3U file...")
+        parse_m3u()
+    else:
+        print("Error: No valid source (file or endpoint) in config.json!")
+        exit(1)
+
     port = \
         int(CONFIG['base_url'].split(":")[-1]) \
         if ":" in CONFIG['base_url'] else 8080

@@ -1,6 +1,11 @@
 {
     "base_url": "http://192.168.0.8:8080",
     "file": "alix-full.m3u",
+    "endpoint" : {
+        "host": "http://iptv:8080",
+        "user": "user",
+        "pass": "password"
+    },
     "credentials": [
         {
             "username": "",
