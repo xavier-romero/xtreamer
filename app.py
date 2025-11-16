@@ -292,20 +292,23 @@ def player_api():
 
 @app.route("/<username>/<password>/<int:stream_id>")
 @app.route("/live/<username>/<password>/<int:stream_id>.ts")
-@app.route("/movie/<username>/<password>/<int:stream_id>.mp4")
+@app.route("/movie/<username>/<password>/<int:stream_id>.<extension>")
 @app.route("/movie/<username>/<password>/<int:stream_id>")
-def proxy_stream(username, password, stream_id):
+def proxy_stream(username, password, stream_id, extension=None):
     if not check_login(username, password):
         return "Unauthorized", 401
 
-    for item in CONFIG['live_streams'] + CONFIG['movie_streams']:
-        if item["stream_id"] == stream_id:
-            source = item["direct_source"]
-            return Response(
-                f"Redirecting to {source}", headers={"Location": source},
-                status=302
-            )
-            return jsonify({"redirect": source})
+    redirect_url = request.url
+    redirect_url = redirect_url.replace(username, CONFIG['endpoint']['user'])
+    redirect_url = redirect_url.replace(password, CONFIG['endpoint']['pass'])
+    redirect_url = \
+        redirect_url.replace(CONFIG['base_url'], CONFIG['endpoint']['host'])
+
+    return Response(
+        f"Redirecting to {redirect_url}", status=302,
+        headers={"Location": redirect_url}
+    )
+
     return "Stream not found", 404
 
 
