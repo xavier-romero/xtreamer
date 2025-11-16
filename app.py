@@ -187,6 +187,9 @@ def generate_channel_logo(text, logo_url):
             print(f"Generating custom file {filename} instead.")
 
     # Reached that point, we're creating a custom image
+    if os.path.exists('./logos/custom_' + filename):
+        return 'custom_' + filename
+
     padding = 20
     font_size = 48
     text_color = (255, 255, 255)
@@ -215,6 +218,7 @@ def generate_channel_logo(text, logo_url):
 
     draw.text((text_x, text_y), text, font=font, fill=text_color)
 
+    filename = f"custom_{filename}"
     img.save('./logos/' + filename, "PNG")
     return filename
 
