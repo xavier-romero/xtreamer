@@ -203,7 +203,10 @@ def generate_channel_logo(text, logo_url):
     # Crear imagen con tamaño dinámico
     dummy = Image.new("RGB", (1, 1))
     draw_dummy = ImageDraw.Draw(dummy)
-    text_width, text_height = draw_dummy.textsize(text, font=font)
+
+    bbox = draw_dummy.textbbox((0, 0), text, font=font)
+    text_width = bbox[2] - bbox[0]
+    text_height = bbox[3] - bbox[1]
 
     width = text_width + padding * 2
     height = text_height + padding * 2
