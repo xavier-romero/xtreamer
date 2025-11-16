@@ -25,5 +25,14 @@
         "MAGHREB", "AF |", "AL |", "ALB |", "AMAZIGH", "AR |",
         "BG |", "BR |", "CN |", "DE |",
         "EU |", "EXYU", "EX-YU"
-    ]
+    ],
+    "custom_live_categories": {
+        "futbol": [
+            "LaLiga",
+            "Premier League",
+            "Serie A",
+            "Bundesliga",
+            "Ligue 1"
+        ]
+    }
 }

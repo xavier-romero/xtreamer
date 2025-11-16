@@ -96,13 +96,17 @@ def parse_from_endpoint():
         return []
 
     CONFIG["live_categories"] = [
+        {"category_id": k, "category_name": k}
+        for k in CONFIG["custom_live_categories"]
+    ]
+    CONFIG["live_categories"].extend([
         cat for cat in _fetch(ep_url, "get_live_categories")
         if cat["category_name"] in CONFIG['whitelisted_grups']
         or not any(
             cat["category_name"].startswith(prefix)
             for prefix in CONFIG['blacklisted_grup_prefixes']
         )
-    ]
+    ])
     CONFIG["live_streams"] = [
         stream for stream in _fetch(ep_url, "get_live_streams")
         if any(
@@ -110,6 +114,14 @@ def parse_from_endpoint():
             for cat in CONFIG["live_categories"]
         )
     ]
+    for stream in CONFIG["live_streams"]:
+        for category, match_names in CONFIG["custom_live_categories"].items():
+            if any(
+                stream["name"].startswith(match_name)
+                for match_name in match_names
+            ):
+                stream["category_id"] = category
+
     CONFIG["movie_categories"] = [
         cat for cat in _fetch(ep_url, "get_vod_categories")
         if cat["category_name"] in CONFIG['whitelisted_grups']
