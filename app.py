@@ -1,7 +1,4 @@
 from flask import Flask, request, jsonify, Response, send_from_directory
-from PIL import Image, ImageDraw, ImageFont
-import requests
-import hashlib
 import os
 import re
 import json
@@ -10,152 +7,6 @@ import sys
 
 CONFIG = {}
 app = Flask(__name__)
-
-
-def parse_from_endpoint():
-    ep_url = \
-        f"{CONFIG['endpoint']['host']}/player_api.php?" \
-        f"username={CONFIG['endpoint']['user']}&" \
-        f"password={CONFIG['endpoint']['pass']}&" \
-        "action="
-
-    def _fetch(url, action):
-        response = requests.get(url + action)
-        if response.status_code == 200:
-            return response.json()
-        return []
-
-    CONFIG["live_categories"] = [
-        {"category_id": k, "category_name": k}
-        for k in CONFIG["custom_live_categories"]
-    ]
-    CONFIG["live_categories"].extend([
-        cat for cat in _fetch(ep_url, "get_live_categories")
-        if cat["category_name"] in CONFIG['whitelisted_grups']
-        or not any(
-            cat["category_name"].startswith(prefix)
-            for prefix in CONFIG['blacklisted_grup_prefixes']
-        )
-    ])
-    CONFIG["live_streams"] = [
-        stream for stream in _fetch(ep_url, "get_live_streams")
-        if any(
-            stream["category_id"] == cat["category_id"]
-            for cat in CONFIG["live_categories"]
-        )
-    ]
-    for stream in CONFIG["live_streams"]:
-        for category, match_names in CONFIG["custom_live_categories"].items():
-            if any(
-                stream["name"].startswith(match_name)
-                for match_name in match_names
-            ):
-                stream["category_id"] = category
-
-    CONFIG["movie_categories"] = [
-        cat for cat in _fetch(ep_url, "get_vod_categories")
-        if cat["category_name"] in CONFIG['whitelisted_grups']
-        or not any(
-            cat["category_name"].startswith(prefix)
-            for prefix in CONFIG['blacklisted_grup_prefixes']
-        )
-    ]
-    CONFIG["movie_streams"] = [
-        stream for stream in _fetch(ep_url, "get_vod_streams")
-        if any(
-            stream["category_id"] == cat["category_id"]
-            for cat in CONFIG["movie_categories"]
-        )
-    ]
-    CONFIG["series_streams"] = []
-    CONFIG["series_categories"] = []
-    print(
-        f"Loaded {len(CONFIG['live_streams'])} live streams with "
-        f"{len(CONFIG['live_categories'])} categories and "
-        f"{len(CONFIG['movie_streams'])} movies with "
-        f"{len(CONFIG['movie_categories'])} categories "
-        f"from {CONFIG['endpoint']}."
-    )
-
-
-def text_to_filename(text):
-    filename = hashlib.md5(text.encode('utf-8')).hexdigest()
-    filename += ".png"
-    return filename
-
-
-def retrieve_logos():
-    for live_stream in CONFIG['live_streams']:
-        logo_url = live_stream.get("stream_icon", "")
-        if logo_url.startswith(CONFIG['base_url']):
-            continue
-        name = live_stream.get("name", "Unknown")
-        filename = generate_channel_logo(name, logo_url)
-        live_stream["stream_icon"] = f"{CONFIG['base_url']}/logos/{filename}"
-
-
-def generate_channel_logo(text, logo_url):
-    filename = text_to_filename(text)
-
-    # if it already exists just return the path
-    if os.path.exists('./logos/' + filename):
-        if os.path.getsize('./logos/' + filename) > 95:
-            return filename
-        else:
-            os.remove('./logos/' + filename)
-
-    if logo_url and logo_url.startswith("http"):
-        try:
-            response = requests.get(logo_url, timeout=10)
-            if response.status_code == 200:
-                with open('./logos/' + filename, 'wb') as f:
-                    f.write(response.content)
-                if os.path.getsize('./logos/' + filename) > 95:
-                    return filename
-                else:
-                    os.remove('./logos/' + filename)
-        except Exception as e:
-            print(f"Error downloading logo from {logo_url}: {e}")
-            print(f"Generating custom file {filename} instead.")
-
-    # Reached that point, we're creating a custom image
-    if os.path.exists('./logos/custom_' + filename):
-        return 'custom_' + filename
-
-    padding = 20
-    font_size = 48
-    text_color = (255, 255, 255)
-    bg_color = (30, 30, 30)
-
-    try:
-        font = ImageFont.truetype("arial.ttf", font_size)
-    except Exception:
-        font = ImageFont.load_default()
-
-    # Crear imagen con tamaño dinámico
-    dummy = Image.new("RGB", (1, 1))
-    draw_dummy = ImageDraw.Draw(dummy)
-
-    bbox = draw_dummy.textbbox((0, 0), text, font=font)
-    text_width = bbox[2] - bbox[0]
-    text_height = bbox[3] - bbox[1]
-
-    width = text_width + padding * 2
-    height = text_height + padding * 2
-
-    # Crear imagen real
-    img = Image.new("RGB", (width, height), color=bg_color)
-    draw = ImageDraw.Draw(img)
-
-    # Escribir texto centrado
-    text_x = (width - text_width) // 2
-    text_y = (height - text_height) // 2
-
-    draw.text((text_x, text_y), text, font=font, fill=text_color)
-
-    filename = f"custom_{filename}"
-    img.save('./logos/' + filename, "PNG")
-    return filename
 
 
 def check_login(user, pwd):
@@ -260,11 +111,25 @@ def proxy_stream(username, password, stream_id=None, extension=None):
     if not check_login(username, password):
         return "Unauthorized", 401
 
-    redirect_url = request.url
-    redirect_url = redirect_url.replace(username, CONFIG['endpoint']['user'])
-    redirect_url = redirect_url.replace(password, CONFIG['endpoint']['pass'])
-    redirect_url = \
-        redirect_url.replace(CONFIG['base_url'], CONFIG['endpoint']['host'])
+    redirect_url = None
+
+    if request.path.startswith("/movie/"):
+        for movie in CONFIG['movie_streams']:
+            if movie['stream_id'] == stream_id:
+                redirect_url = movie['direct_source']
+                break
+
+    if (
+        request.path.startswith("/live/") or
+        request.path.startswith(f"/{username}/")
+    ):
+        for live in CONFIG['live_streams']:
+            if live['stream_id'] == stream_id:
+                redirect_url = live['direct_source']
+                break
+
+    if not redirect_url:
+        return "Stream not found", 404
 
     return Response(
         f"Redirecting to {redirect_url}", status=302,
@@ -286,28 +151,13 @@ def logos(filename):
         return send_from_directory("logos", filename)
 
 
-def save_stream_data():
-    filename = CONFIG.get("json_save_path")
-    if not filename:
-        return
-
-    with open(filename, "w") as f:
-        json.dump({
-            "live_streams": CONFIG["live_streams"],
-            "movie_streams": CONFIG["movie_streams"],
-            "series_streams": CONFIG["series_streams"],
-            "live_categories": CONFIG["live_categories"],
-            "movie_categories": CONFIG["movie_categories"],
-            "series_categories": CONFIG["series_categories"],
-        }, f, indent=4)
-
-
 def load_stream_data():
-    filename = CONFIG.get("json_save_path")
-    if not filename or not os.path.exists(filename):
-        return False
+    json_data_file = CONFIG.get('json_data_file', 'final_data.json')
+    if not json_data_file or not os.path.exists(json_data_file):
+        print("No existing stream data file found: ", json_data_file)
+        sys.exit(1)
 
-    with open(filename) as f:
+    with open(json_data_file) as f:
         data = json.load(f)
         CONFIG["live_streams"] = data.get("live_streams", [])
         CONFIG["movie_streams"] = data.get("movie_streams", [])
@@ -315,7 +165,6 @@ def load_stream_data():
         CONFIG["live_categories"] = data.get("live_categories", [])
         CONFIG["movie_categories"] = data.get("movie_categories", [])
         CONFIG["series_categories"] = data.get("series_categories", [])
-    return True
 
 
 if __name__ == "__main__":
@@ -334,10 +183,7 @@ if __name__ == "__main__":
         print("Error: No credentials set in config.json!")
         exit(1)
 
-    if not load_stream_data():
-        parse_from_endpoint()
-    retrieve_logos()
-    save_stream_data()
+    load_stream_data()
 
     port = \
         int(CONFIG['base_url'].split(":")[-1]) \

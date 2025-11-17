@@ -1,2 +1,6 @@
 my_config.json
 logos/
+0_upstream_data.json
+1_filtered_data.json
+2_processed_data.json
+3_final_data.json
