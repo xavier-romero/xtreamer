@@ -180,6 +180,9 @@ def player_api():
         port = CONFIG['base_url'].split(":")[-1]
         return jsonify({
             "user_info": {
+                "username": username,
+                "password": password,
+                "is_trial": 0,
                 "auth": 1,
                 "status": "Active"
             },
