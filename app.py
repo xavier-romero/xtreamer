@@ -179,11 +179,11 @@ def player_api():
         return jsonify({
             "user_info": {"auth": 1},
 
-            "available_channels": CONFIG['live_streams'],
-            "available_categories": CONFIG['live_categories'],
+            # "available_channels": CONFIG['live_streams'],
+            # "available_categories": CONFIG['live_categories'],
 
-            "movie_data": CONFIG['movie_streams'],
-            "movie_categories": CONFIG['movie_categories'],
+            # "movie_data": CONFIG['movie_streams'],
+            # "movie_categories": CONFIG['movie_categories'],
         })
 
     if action == "get_live_categories":
