@@ -176,9 +176,19 @@ def player_api():
         return jsonify({"user_info": {"auth": 0}})
 
     if action is None:
-        return proxy_stream(username, password)
+        host = CONFIG['base_url'].split('http://')[1].split(':')[0]
+        port = CONFIG['base_url'].split(":")[-1]
         return jsonify({
-            "user_info": {"auth": 1},
+            "user_info": {
+                "auth": 1,
+                "status": "Active"
+            },
+            "server_info": {
+                "url": host,
+                "port": port,
+                "server_protocol": "http",
+                "timezone": "Europe/Madrid",
+            }
 
             # "available_channels": CONFIG['live_streams'],
             # "available_categories": CONFIG['live_categories'],
