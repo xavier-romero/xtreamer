@@ -176,6 +176,7 @@ def player_api():
         return jsonify({"user_info": {"auth": 0}})
 
     if action is None:
+        return proxy_stream(username, password)
         return jsonify({
             "user_info": {"auth": 1},
 
@@ -242,7 +243,7 @@ def player_api():
 @app.route("/live/<username>/<password>/<int:stream_id>.ts")
 @app.route("/movie/<username>/<password>/<int:stream_id>.<extension>")
 @app.route("/movie/<username>/<password>/<int:stream_id>")
-def proxy_stream(username, password, stream_id, extension=None):
+def proxy_stream(username, password, stream_id=None, extension=None):
     if not check_login(username, password):
         return "Unauthorized", 401
 
@@ -256,8 +257,6 @@ def proxy_stream(username, password, stream_id, extension=None):
         f"Redirecting to {redirect_url}", status=302,
         headers={"Location": redirect_url}
     )
-
-    return "Stream not found", 404
 
 
 @app.route("/xmltv.php")
