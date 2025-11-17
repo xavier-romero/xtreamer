@@ -1,22 +1,46 @@
 # xtreamer
 
-Provide a valid .m3u files with live/movie streams/urls and it will just export it in Xtream Codes format for use from apps like ZenPlayer, etc.
+Server for IPTV Xtream Code clients.
 
-As I had m3u files with many broken/missing urls for channel icons, it downloads icons to local logos folder, and if they're missing or broken, it builds a custom logo with just the channel name so you can identify it easily from the app.
+## Parse your backend
+Having a valid IPTV Xtream Code server, run create_data.py to retrieve available media, filter according to your criteria, create missing icons, and create custom groups for easy navigation.
+All these processes are configured through the config.json file.
 
-## Requirements & run
 ```bash
-pip3 install -r requeriments.txt
-mkdir logos
+python3 create_data.py my_config.json
 ```
 
-A valid config.json file, just reuse the one provided and replace:
-- credentials with a valid set of credentials
-- file is the m3u filename sitting in the same folder
-- base_url is the external URL as seen from your player (its used to set the logo url for channels as they're stored locally)
+The process will create 3 files:
+- 0_upstream_data.json with raw data from your provider
+- 1_filtered_data.json it's the filtered raw data, so just your selected groups
+- 2_processed_data.json has direct_source url, ids reordered and remapped with all gaps filled
+- 3_final_data.json has all icons fetched locally for live streams, filling missing ones
 
-```
-python3 app.py
+
+## Start your server
+
+Ideally, add it to your systemcl system for automatic start and restart. For instance:
+
+```bash
+# This is an example file for /etc/systemd/system/xtreamer.service
+[Unit]
+Description=XTream Server
+After=network.target
+
+[Service]
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/xtreamer
+ExecStart=python3 app.py my_config.json
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
 ```
 
-First execution downloads icons for all your channels (not for movies) so it can take some time depending on the number of channels and if they have an icon set or not.
+For testing you can manually run:
+
+```bash
+python3 app.py my_config.json
+```
