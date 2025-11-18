@@ -2,8 +2,10 @@ import sys
 import json
 from time import time
 
-# # name,icon_url,category_name,extension,source_url
-# Frozen,https://www.themoviedb.org/t/p/w600_and_h900_bestv2/hAKhrHvzQDUHQP5zd5HFeqF2BCN.jpg,Gerard,mp4,
+
+if len(sys.argv) < 2:
+    print("Usage: python add_vod_files.py config.json")
+    sys.exit(1)
 
 config_file = sys.argv[1]
 with open(config_file) as f:
@@ -32,6 +34,7 @@ category_ids = set(int(cid) for cid in category_ids_str)
 next_category_id = max(category_ids) + 1
 
 csv_file = CONFIG.get("s3_uploads", {}).get("csv_file", "uploads.csv")
+movies_added = 0
 with open(csv_file, "r") as f:
     for line in f:
         if not line:
@@ -63,7 +66,7 @@ with open(csv_file, "r") as f:
             continue
 
         print(f"Adding movie: {movie_name} with extension: {extension}")
-
+        movies_added += 1
         category_id = category_map.get(category_name)
         if not category_id:
             print(f"Adding new category: {category_name}")
@@ -92,7 +95,9 @@ with open(csv_file, "r") as f:
         next_stream_id += 1
         data['movie_streams'].append(vod)
 
-
-with open(json_data_file, "w") as f:
-    json.dump(data, f, indent=4)
-print(f"Added {len(data['movie_streams'])} movies to {json_data_file}.")
+if movies_added > 0:
+    with open(json_data_file, "w") as f:
+        json.dump(data, f, indent=4)
+    print(f"Added {movies_added} movies to {json_data_file}.")
+else:
+    print("No new movies were added.")

@@ -7,6 +7,10 @@ import hashlib
 from urllib.parse import quote_plus
 
 
+if len(sys.argv) < 3:
+    print("Usage: python upload_to_s3.py config.json /path/to/movie1 /path/to/movie2 ...")  # noqa
+    sys.exit(1)
+
 config_file = sys.argv[1]
 with open(config_file) as f:
     CONFIG = json.load(f)
@@ -95,8 +99,8 @@ def main():
 
     # Output CSV
     output_file = CONFIG.get("s3_uploads", {}).get("csv_file", "uploads.csv")
-    print(f"Writing CSV output to: {output_file}")
-    with open(output_file, "w") as f:
+    print(f"Appending CSV output to: {output_file}")
+    with open(output_file, "a") as f:
         f.write("# name,hashed_name,extension,icon_url\n")
         f.write('category=CustomMovies\n')
         for row in rows:
