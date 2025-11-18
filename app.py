@@ -1,3 +1,4 @@
+import boto3
 from flask import Flask, request, jsonify, Response, send_from_directory
 import os
 import re
@@ -6,6 +7,7 @@ import sys
 
 
 CONFIG = {}
+s3 = None
 app = Flask(__name__)
 
 
@@ -76,6 +78,18 @@ def player_api():
         )
         if not vod:
             return jsonify({"error": "vod not found"})
+
+        if vod.get("s3_hashed_name"):
+            key = vod["s3_hashed_name"]
+            direct_source = s3.generate_presigned_url(
+                ClientMethod="get_object",
+                Params={
+                    "Bucket": CONFIG.get('s3_uploads', {}).get('aws', {}).get('s3_bucket'),  # noqa
+                    "Key": key
+                },
+                ExpiresIn=3600*3  # in seconds
+            )
+            vod["direct_source"] = direct_source
 
         return jsonify({
             "info": {
@@ -182,6 +196,13 @@ if __name__ == "__main__":
     ):
         print("Error: No credentials set in config.json!")
         exit(1)
+
+    s3 = boto3.client(
+        "s3",
+        aws_access_key_id=CONFIG.get("s3_uploads", {}).get("aws", {}).get("aws_access_key_id"),  # noqa
+        aws_secret_access_key=CONFIG.get("s3_uploads", {}).get("aws", {}).get("aws_secret_access_key"),  # noqa
+        region_name=CONFIG.get("s3_uploads", {}).get("aws", {}).get("region_name"),  # noqa
+    )
 
     load_stream_data()
 

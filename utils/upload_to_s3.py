@@ -17,6 +17,7 @@ with open(config_file) as f:
 
 BUCKET_NAME = CONFIG.get("s3_uploads", {}).get("aws", {}).get("s3_bucket")
 TMDB_API_KEY = CONFIG.get("s3_uploads", {}).get("tmdb_api_key")
+MOVIE_PREFIX = CONFIG.get("s3_uploads", {}).get("prefix", "")
 if not BUCKET_NAME or not TMDB_API_KEY:
     print("No S3 bucket or TMDB API key configured in config file.")
     sys.exit(1)
@@ -94,6 +95,9 @@ def main():
 
         # Fetch poster
         poster_url = get_poster_url(movie_name)
+
+        # Movie name will be store on a CSV file, so remove commas
+        movie_name = MOVIE_PREFIX + movie_name.replace(",", "")
 
         rows.append([movie_name, hashed, extension, poster_url])
 
