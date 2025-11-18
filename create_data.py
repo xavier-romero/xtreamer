@@ -235,7 +235,12 @@ def generate_channel_logo(text, logo_url):
 
 
 if __name__ == "__main__":
-    config_file = sys.argv[1] if len(sys.argv) > 1 else "config.json"
+
+    if len(sys.argv) < 2:
+        print("Usage: python create_data.py config.json [steps_from]")
+        sys.exit(1)
+
+    config_file = sys.argv[1]
     with open(config_file) as f:
         CONFIG = json.load(f)
 
