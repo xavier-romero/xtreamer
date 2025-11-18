@@ -19,6 +19,7 @@ def fetch_from_endpoint(endpoint_info):
             return response.json()
         return []
 
+    print(f"Fetching data from endpoint {endpoint_info['url']}...")
     result = {
         "live_categories": _fetch(ep_url, "get_live_categories"),
         "live_streams": _fetch(ep_url, "get_live_streams"),
