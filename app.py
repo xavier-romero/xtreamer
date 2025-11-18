@@ -1,5 +1,6 @@
 import boto3
 from flask import Flask, request, jsonify, Response, send_from_directory
+from time import time
 import os
 import re
 import json
@@ -8,6 +9,7 @@ import sys
 
 CONFIG = {}
 s3 = None
+s3_presigneds = {}
 app = Flask(__name__)
 
 
@@ -80,16 +82,7 @@ def player_api():
             return jsonify({"error": "vod not found"})
 
         if vod.get("s3_hashed_name"):
-            key = vod["s3_hashed_name"]
-            direct_source = s3.generate_presigned_url(
-                ClientMethod="get_object",
-                Params={
-                    "Bucket": CONFIG.get('s3_uploads', {}).get('aws', {}).get('s3_bucket'),  # noqa
-                    "Key": key
-                },
-                ExpiresIn=3600*3  # in seconds
-            )
-            vod["direct_source"] = direct_source
+            set_or_update_presigned_url(vod)
 
         return jsonify({
             "info": {
@@ -117,6 +110,43 @@ def player_api():
     return jsonify({"error": "Unknown action"}), 400
 
 
+def set_or_update_presigned_url(vod):
+    key = vod["s3_hashed_name"]
+    if not key:
+        print(
+            f"No s3_hashed_name for movie {vod['name']} with id "
+            f"{vod['stream_id']}, skipping presigned URL generation."
+        )
+        return
+
+    direct_source = None
+    if key in s3_presigneds:
+        expires = s3_presigneds[key]['expires']
+        if expires - int(time()) > 3600:  # 1h remaining
+            direct_source = s3_presigneds[key]['url']
+            print(f"Using cached presigned URL for movie {vod['name']}")
+
+    if direct_source:
+        vod["direct_source"] = direct_source
+        return
+
+    direct_source = s3.generate_presigned_url(
+        ClientMethod="get_object",
+        Params={
+            "Bucket": CONFIG.get('s3_uploads', {}).get('aws', {}).get('s3_bucket'),  # noqa
+            "Key": key
+        },
+        ExpiresIn=3600*6  # in seconds
+    )
+    s3_presigneds[key] = {
+        "url": direct_source,
+        "expires": int(time()) + 3600*6
+    }
+    print(f"Generated new presigned URL for movie {vod['name']}")
+    vod["direct_source"] = direct_source
+    return
+
+
 @app.route("/<username>/<password>/<int:stream_id>")
 @app.route("/live/<username>/<password>/<int:stream_id>.ts")
 @app.route("/movie/<username>/<password>/<int:stream_id>.<extension>")
@@ -130,6 +160,8 @@ def proxy_stream(username, password, stream_id=None, extension=None):
     if request.path.startswith("/movie/"):
         for movie in CONFIG['movie_streams']:
             if movie['stream_id'] == stream_id:
+                if movie.get("s3_hashed_name"):
+                    set_or_update_presigned_url(movie)
                 redirect_url = movie['direct_source']
                 break
 
