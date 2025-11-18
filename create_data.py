@@ -119,14 +119,15 @@ def process_data(data, endpoint_info):
     for live_stream in result['live_streams']:
         live_stream["direct_source"] = live_url(live_stream['stream_id'])
 
-    # live categories
+    # live categories remap
+    live_cat_remap = {}
     for i, live_cat in enumerate(result['live_categories']):
-        new_id = str(i + 1)
-        original_id = live_cat['category_id']
-        for live_stream in result['live_streams']:
-            if live_stream['category_id'] == original_id:
-                live_stream['category_id'] = new_id
-        live_cat['category_id'] = new_id
+        live_cat_remap[live_cat['category_id']] = str(i + 1)
+        live_cat['category_id'] = live_cat_remap[live_cat['category_id']]
+
+    for live_stream in result['live_streams']:
+        original_id = live_stream['category_id']
+        live_stream['category_id'] = live_cat_remap[original_id]
 
     # movie streams
     for movie_stream in result['movie_streams']:
@@ -134,14 +135,15 @@ def process_data(data, endpoint_info):
         movie_stream["direct_source"] = \
             movie_url(movie_stream['stream_id'], ext)
 
-    # movie categories
+    # movie categories remap
+    movie_cat_remap = {}
     for i, movie_cat in enumerate(result['movie_categories']):
-        new_id = str(i + 1)
-        original_id = movie_cat['category_id']
-        for movie_stream in result['movie_streams']:
-            if movie_stream['category_id'] == original_id:
-                movie_stream['category_id'] = new_id
-        movie_cat['category_id'] = new_id
+        movie_cat_remap[movie_cat['category_id']] = str(i + 1)
+        movie_cat['category_id'] = movie_cat_remap[movie_cat['category_id']]
+
+    for movie_stream in result['movie_streams']:
+        original_id = movie_stream['category_id']
+        movie_stream['category_id'] = movie_cat_remap[original_id]
 
     print("Processed data to add direct source URLs and reorder categories.")
 
