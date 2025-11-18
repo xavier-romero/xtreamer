@@ -44,3 +44,24 @@ For testing you can manually run:
 ```bash
 python3 app.py my_config.json
 ```
+
+## S3
+utils/upload_to_s3.py allows to upload local files to S3 bucket.
+Usage:
+```bash
+python3 utils/uplaod_to_s3.py my_config.json /path/to/movie1 /path/to/movie2
+```
+or:
+```bash
+python3 utils/uplaod_to_s3.py my_config.json /path/to/movies/*.mkv
+```
+Required in config file:
+```json
+    "aws": {
+        "s3_bucket": "bucket name",
+        "aws_access_key_id": "acces key",
+        "aws_secret_access_key": "secret access key",
+        "region_name": "eu-north-1"
+    },
+    "tmdb_api_key": "tmdb api key"
+```

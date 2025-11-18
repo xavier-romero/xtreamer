@@ -242,25 +242,39 @@ if __name__ == "__main__":
     ep_info = CONFIG['endpoint']
     json_data_file = CONFIG.get('json_data_file', 'final_data.json')
 
+    steps_from = int(sys.argv[2]) if len(sys.argv) > 2 else 0
+
     # raw info from upstream endpoint
-    upstream_data = fetch_from_endpoint(ep_info)
-    with open("0_upstream_data.json", "w") as f:
-        json.dump(upstream_data, f, indent=4)
+    if steps_from <= 0:
+        upstream_data = fetch_from_endpoint(ep_info)
+        with open("0_upstream_data.json", "w") as f:
+            json.dump(upstream_data, f, indent=4)
+    else:
+        with open("0_upstream_data.json", "r") as f:
+            upstream_data = json.load(f)
 
     # filtered data after applying whitelists/blacklists
-    filtered_data = filter_data(
-        upstream_data,
-        whitelisted_grups=CONFIG.get("whitelisted_grups", []),
-        blacklisted_grup_prefixes=CONFIG.get("blacklisted_grup_prefixes", []),
-        custom_live_categories=CONFIG.get("custom_live_categories", {})
-    )
-    with open("1_filtered_data.json", "w") as f:
-        json.dump(filtered_data, f, indent=4)
+    if steps_from <= 1:
+        filtered_data = filter_data(
+            upstream_data,
+            whitelisted_grups=CONFIG.get("whitelisted_grups", []),
+            blacklisted_grup_prefixes=CONFIG.get("blacklisted_grup_prefixes", []),  # noqa
+            custom_live_categories=CONFIG.get("custom_live_categories", {})
+        )
+        with open("1_filtered_data.json", "w") as f:
+            json.dump(filtered_data, f, indent=4)
+    else:
+        with open("1_filtered_data.json", "r") as f:
+            filtered_data = json.load(f)
 
     # processed data with direct source URLs and reordered categories
-    processed_data = process_data(filtered_data, ep_info)
-    with open("2_processed_data.json", "w") as f:
-        json.dump(processed_data, f, indent=4)
+    if steps_from <= 2:
+        processed_data = process_data(filtered_data, ep_info)
+        with open("2_processed_data.json", "w") as f:
+            json.dump(processed_data, f, indent=4)
+    else:
+        with open("2_processed_data.json", "r") as f:
+            processed_data = json.load(f)
 
     # Download icons and create missing ones
     final_data = retrieve_logos(processed_data, CONFIG['base_url'])

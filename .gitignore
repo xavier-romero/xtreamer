@@ -4,3 +4,4 @@ logos/
 1_filtered_data.json
 2_processed_data.json
 3_final_data.json
+s3_uploads.csv
