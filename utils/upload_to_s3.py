@@ -17,7 +17,7 @@ with open(config_file) as f:
 
 BUCKET_NAME = CONFIG.get("s3_uploads", {}).get("aws", {}).get("s3_bucket")
 TMDB_API_KEY = CONFIG.get("s3_uploads", {}).get("tmdb_api_key")
-MOVIE_PREFIX = CONFIG.get("s3_uploads", {}).get("prefix", "")
+MOVIE_CATEGORY = CONFIG.get("s3_uploads", {}).get("category", "Custom")
 if not BUCKET_NAME or not TMDB_API_KEY:
     print("No S3 bucket or TMDB API key configured in config file.")
     sys.exit(1)
@@ -97,7 +97,7 @@ def main():
         poster_url = get_poster_url(movie_name)
 
         # Movie name will be store on a CSV file, so remove commas
-        movie_name = MOVIE_PREFIX + movie_name.replace(",", "")
+        movie_name = movie_name.replace(",", "")
 
         rows.append([movie_name, hashed, extension, poster_url])
 
@@ -106,7 +106,7 @@ def main():
     print(f"Appending CSV output to: {output_file}")
     with open(output_file, "a") as f:
         f.write("# name,hashed_name,extension,icon_url\n")
-        f.write('category=CustomMovies\n')
+        f.write(f"category={MOVIE_CATEGORY}\n")
         for row in rows:
             f.write(",".join([field if field else "" for field in row]) + "\n")
 

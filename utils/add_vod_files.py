@@ -34,6 +34,8 @@ category_ids = set(int(cid) for cid in category_ids_str)
 next_category_id = max(category_ids) + 1
 
 csv_file = CONFIG.get("s3_uploads", {}).get("csv_file", "uploads.csv")
+category_name = CONFIG.get("s3_uploads", {}).get("category", "Custom")
+print(f"Processing category: {category_name}")
 movies_added = 0
 with open(csv_file, "r") as f:
     for line in f:
@@ -45,7 +47,7 @@ with open(csv_file, "r") as f:
         # if line is: category=category_name
         if line.startswith("category="):
             category_name = line.strip().split("=", 1)[1]
-            print(f"Processing category: {category_name}")
+            print(f"Switching to category: {category_name}")
             continue
 
         fields = line.strip().split(',')
@@ -59,9 +61,12 @@ with open(csv_file, "r") as f:
         exists = False
         for movie_stream in data.get('movie_streams', []):
             if movie_stream.get('name') == movie_name:
-                print(f"Movie {movie_name} already exists. Skipping.")
-                exists = True
-                break
+                if movie_stream.get('category_id') == str(category_map.get(category_name)):  # noqa
+                    print(f"Movie {movie_name} already exists. Skipping.")
+                    exists = True
+                    break
+                else:
+                    print(f"Movie {movie_name} exists but in different category. Adding to {category_name}.")  # noqa
         if exists:
             continue
 
