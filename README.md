@@ -17,7 +17,41 @@ The process will create 3 files:
 - 3_final_data.json has all icons fetched locally for live streams, filling missing ones
 
 
-## Start your server
+## Add custom content
+
+### Upload to S3
+
+utils/upload_to_s3.py allows to upload local files to S3 bucket.
+Usage:
+```bash
+python3 utils/uplaod_to_s3.py my_config.json /path/to/movie1 /path/to/movie2
+```
+or:
+```bash
+python3 utils/uplaod_to_s3.py my_config.json /path/to/movies/*.mkv
+```
+Required in config file:
+```json
+    "s3_uploads": {
+        "aws": {
+            "s3_bucket": "bucketname",
+            "aws_access_key_id": "ACCESSKEY",
+            "aws_secret_access_key": "SECRET_ACCESS_KEY",
+            "region_name": "eu-north-1"
+        },
+        "tmdb_api_key": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "csv_file": "s3_uploads.csv",
+        "category": "CustomMovies"
+    }
+```
+
+## Add to server
+This script reads the output file generated on previous step and configure the json data file adding just the required new movies/categories.
+```bash
+python3 utils/add_vod_files.py
+```
+
+## Run server
 
 Ideally, add it to your systemcl system for automatic start and restart. For instance:
 
@@ -43,25 +77,4 @@ For testing you can manually run:
 
 ```bash
 python3 app.py my_config.json
-```
-
-## S3
-utils/upload_to_s3.py allows to upload local files to S3 bucket.
-Usage:
-```bash
-python3 utils/uplaod_to_s3.py my_config.json /path/to/movie1 /path/to/movie2
-```
-or:
-```bash
-python3 utils/uplaod_to_s3.py my_config.json /path/to/movies/*.mkv
-```
-Required in config file:
-```json
-    "aws": {
-        "s3_bucket": "bucket name",
-        "aws_access_key_id": "acces key",
-        "aws_secret_access_key": "secret access key",
-        "region_name": "eu-north-1"
-    },
-    "tmdb_api_key": "tmdb api key"
 ```
