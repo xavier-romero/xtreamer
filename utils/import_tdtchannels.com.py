@@ -27,6 +27,9 @@ stream_ids = [
 next_live_num = max(live_nums) + 1
 next_stream_id = max(stream_ids) + 1
 
+ambits_whitelist = \
+    CONFIG.get("tdtchannels_com", {}).get("whitelisted_ambits", [])
+
 # tdtchannels.com import
 prefix = "tdtch"
 tdtch_data = requests.get("https://www.tdtchannels.com/lists/tv.json").json()
@@ -35,6 +38,10 @@ live_categories = []
 live_streams = []
 
 for ambit in tdtch_data['countries'][0]['ambits']:
+    if ambit['name'] not in ambits_whitelist:
+        print(f"Skipping ambit/category: {ambit['name']}")
+        continue
+
     category_id = f"{prefix}_{ambit['name']}".replace(' ', '_').lower()
     category_name = f"{prefix.upper()} | {ambit['name']}"
 
