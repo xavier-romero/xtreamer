@@ -29,9 +29,6 @@ category_map = {
     cat['category_name']: cat['category_id']
     for cat in data.get('movie_categories', [])
 }
-category_ids_str = set(category_map.values())
-category_ids = set(int(cid) for cid in category_ids_str)
-next_category_id = max(category_ids) + 1
 
 csv_file = CONFIG.get("s3_uploads", {}).get("csv_file", "uploads.csv")
 category_name = CONFIG.get("s3_uploads", {}).get("category", "Custom")
@@ -75,8 +72,7 @@ with open(csv_file, "r") as f:
         category_id = category_map.get(category_name)
         if not category_id:
             print(f"Adding new category: {category_name}")
-            category_id = next_category_id
-            next_category_id += 1
+            category_id = category_name.replace(' ', '_').lower()
             category_map[category_name] = category_id
             new_category = {
                 "category_id": str(category_id),

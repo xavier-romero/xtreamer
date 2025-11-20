@@ -40,113 +40,127 @@ def fetch_from_endpoint(endpoint_info):
     return result
 
 
-def filter_data(
-    data, whitelisted_grups=[], blacklisted_grup_prefixes=[],
-    custom_live_categories={}
-):
+def filter_data(ep_data, whitelisted_grups=[]):
     result = {}
 
-    result["live_categories"] = [
-        {"category_id": k, "category_name": k}
-        for k in custom_live_categories.keys()
-    ]
-    result["live_categories"].extend([
-        cat for cat in data["live_categories"]
-        if cat["category_name"] in whitelisted_grups
-        or not any(
-            cat["category_name"].startswith(prefix)
-            for prefix in blacklisted_grup_prefixes
-        )
-    ])
+    for ep_name in ep_data:
+        data = ep_data[ep_name]
+        result[ep_name] = {}
 
-    result["live_streams"] = [
-        stream for stream in data["live_streams"]
-        if any(
-            stream["category_id"] == cat["category_id"]
-            for cat in result["live_categories"]
-        )
-    ]
-    for stream in result["live_streams"]:
-        for category, match_names in custom_live_categories.items():
+        # filter live categories and streams
+        result[ep_name]["live_categories"] = [
+            cat for cat in data["live_categories"]
             if any(
-                stream["name"].startswith(match_name)
-                for match_name in match_names
-            ):
-                stream["category_id"] = category
+                cat["category_name"].lower().startswith(w.lower())
+                for w in whitelisted_grups
+            )
+        ]
 
-    result["movie_categories"] = [
-        cat for cat in data["movie_categories"]
-        if cat["category_name"] in whitelisted_grups
-        or not any(
-            cat["category_name"].startswith(prefix)
-            for prefix in blacklisted_grup_prefixes
+        result[ep_name]["live_streams"] = [
+            stream for stream in data["live_streams"]
+            if any(
+                stream["category_id"] == cat["category_id"]
+                for cat in result[ep_name]["live_categories"]
+            )
+        ]
+
+        # filter movie categories and streams
+        result[ep_name]["movie_categories"] = [
+            cat for cat in data["movie_categories"]
+            if any(
+                cat["category_name"].lower().startswith(w.lower())
+                for w in whitelisted_grups
+            )
+        ]
+        result[ep_name]["movie_streams"] = [
+            stream for stream in data["movie_streams"]
+            if any(
+                stream["category_id"] == cat["category_id"]
+                for cat in result[ep_name]["movie_categories"]
+            )
+        ]
+        result[ep_name]["series_streams"] = []
+        result[ep_name]["series_categories"] = []
+        print(
+            f"Got {len(result[ep_name]['live_streams'])} live streams with "
+            f"{len(result[ep_name]['live_categories'])} categories and "
+            f"{len(result[ep_name]['movie_streams'])} movies with "
+            f"{len(result[ep_name]['movie_categories'])} categories "
+            f"after filtering data for ep {ep_name}."
         )
-    ]
-    result["movie_streams"] = [
-        stream for stream in data["movie_streams"]
-        if any(
-            stream["category_id"] == cat["category_id"]
-            for cat in result["movie_categories"]
-        )
-    ]
-    result["series_streams"] = []
-    result["series_categories"] = []
-    print(
-        f"Got {len(result['live_streams'])} live streams with "
-        f"{len(result['live_categories'])} categories and "
-        f"{len(result['movie_streams'])} movies with "
-        f"{len(result['movie_categories'])} categories "
-        "after filtering data."
-    )
 
     return result
 
 
-def process_data(data, endpoint_info):
-    def live_url(stream_id):
+def process_data(data, endpoints_info, custom_live_categories):
+    def live_url(stream_id, endpoint_info):
         return \
             f"{endpoint_info['url']}/" \
             f"{endpoint_info['user']}/{endpoint_info['pass']}/{stream_id}"
 
-    def movie_url(stream_id, ext="mp4"):
+    def movie_url(stream_id, endpoint_info, ext="mp4"):
         return \
             f"{endpoint_info['url']}/movie/" \
             f"{endpoint_info['user']}/{endpoint_info['pass']}/" \
             f"{stream_id}.{ext}"
 
-    result = data
+    result = {
+        "live_categories": [
+            {"category_id": k, "category_name": k}
+            for k in custom_live_categories.keys()
+        ],
+        "live_streams": [],
+        "movie_categories": [],
+        "movie_streams": [],
+        "series_categories": [],
+        "series_streams": []
+    }
 
-    # live streams
-    for live_stream in result['live_streams']:
-        live_stream["direct_source"] = live_url(live_stream['stream_id'])
+    global_live_stream_id = 1
+    global_movie_stream_id = 1
 
-    # live categories remap
-    live_cat_remap = {}
-    for i, live_cat in enumerate(result['live_categories']):
-        live_cat_remap[live_cat['category_id']] = str(i + 1)
-        live_cat['category_id'] = live_cat_remap[live_cat['category_id']]
+    # live
+    for ep_name, ep_data in data.items():
+        for live_cat in ep_data['live_categories']:
+            new_cat_id = f"{ep_name}_{live_cat['category_id']}"
+            live_cat['category_id'] = new_cat_id
+            new_parent_id = f"{ep_name}_{live_cat.get('parent_id', '')}"
+            live_cat['parent_id'] = new_parent_id
+            result["live_categories"].append(live_cat)
 
-    for live_stream in result['live_streams']:
-        original_id = live_stream['category_id']
-        live_stream['category_id'] = live_cat_remap[original_id]
+        for live_stream in ep_data['live_streams']:
+            new_cat_id = f"{ep_name}_{live_stream['category_id']}"
+            # search if thats one of our custom categories
+            for category, match_names in custom_live_categories.items():
+                if any(
+                    live_stream["name"].startswith(match_name)
+                    for match_name in match_names
+                ):
+                    new_cat_id = category
+            live_stream['category_id'] = new_cat_id
+            live_stream["direct_source"] = \
+                live_url(live_stream['stream_id'], endpoints_info[ep_name])
+            live_stream["stream_id"] = global_live_stream_id
+            live_stream["num"] = global_live_stream_id
+            global_live_stream_id += 1
+            result["live_streams"].append(live_stream)
 
-    # movie streams
-    for movie_stream in result['movie_streams']:
-        ext = movie_stream.get("container_extension", "mp4")
-        movie_stream["direct_source"] = \
-            movie_url(movie_stream['stream_id'], ext)
+        for movie_cat in ep_data['movie_categories']:
+            new_cat_id = f"{ep_name}_{movie_cat['category_id']}"
+            movie_cat['category_id'] = new_cat_id
+            result["movie_categories"].append(movie_cat)
 
-    # movie categories remap
-    movie_cat_remap = {}
-    for i, movie_cat in enumerate(result['movie_categories']):
-        movie_cat_remap[movie_cat['category_id']] = str(i + 1)
-        movie_cat['category_id'] = movie_cat_remap[movie_cat['category_id']]
-
-    for movie_stream in result['movie_streams']:
-        original_id = movie_stream['category_id']
-        movie_stream['category_id'] = movie_cat_remap[original_id]
-
-    print("Processed data to add direct source URLs and reorder categories.")
+        for movie_stream in ep_data['movie_streams']:
+            new_cat_id = f"{ep_name}_{movie_stream['category_id']}"
+            movie_stream['category_id'] = new_cat_id
+            ext = movie_stream.get("container_extension", "mp4")
+            movie_stream["direct_source"] = \
+                movie_url(
+                    movie_stream['stream_id'], endpoints_info[ep_name], ext)
+            movie_stream["stream_id"] = global_movie_stream_id
+            movie_stream["num"] = global_movie_stream_id
+            global_movie_stream_id += 1
+            result["movie_streams"].append(movie_stream)
 
     return result
 
@@ -244,14 +258,15 @@ if __name__ == "__main__":
     with open(config_file) as f:
         CONFIG = json.load(f)
 
-    ep_info = CONFIG['endpoint']
     json_data_file = CONFIG.get('json_data_file', 'final_data.json')
-
     steps_from = int(sys.argv[2]) if len(sys.argv) > 2 else 0
 
-    # raw info from upstream endpoint
     if steps_from <= 0:
-        upstream_data = fetch_from_endpoint(ep_info)
+        upstream_data = {}
+        for ep_name, ep_info in CONFIG['endpoints'].items():
+            print(f"Processing endpoint: {ep_name}")
+            # raw info from upstream endpoint
+            upstream_data[ep_name] = fetch_from_endpoint(ep_info)
         with open("0_upstream_data.json", "w") as f:
             json.dump(upstream_data, f, indent=4)
     else:
@@ -262,9 +277,7 @@ if __name__ == "__main__":
     if steps_from <= 1:
         filtered_data = filter_data(
             upstream_data,
-            whitelisted_grups=CONFIG.get("whitelisted_grups", []),
-            blacklisted_grup_prefixes=CONFIG.get("blacklisted_grup_prefixes", []),  # noqa
-            custom_live_categories=CONFIG.get("custom_live_categories", {})
+            whitelisted_grups=CONFIG.get("whitelisted_grups", [])
         )
         with open("1_filtered_data.json", "w") as f:
             json.dump(filtered_data, f, indent=4)
@@ -274,14 +287,18 @@ if __name__ == "__main__":
 
     # processed data with direct source URLs and reordered categories
     if steps_from <= 2:
-        processed_data = process_data(filtered_data, ep_info)
+        processed_data = process_data(
+            filtered_data, CONFIG['endpoints'],
+            CONFIG.get("custom_live_categories", {})
+        )
         with open("2_processed_data.json", "w") as f:
             json.dump(processed_data, f, indent=4)
     else:
         with open("2_processed_data.json", "r") as f:
             processed_data = json.load(f)
 
-    # Download icons and create missing ones
-    final_data = retrieve_logos(processed_data, CONFIG['base_url'])
-    with open(json_data_file, "w") as f:
-        json.dump(final_data, f, indent=4)
+    if steps_from <= 3:
+        # Download icons and create missing ones
+        final_data = retrieve_logos(processed_data, CONFIG['base_url'])
+        with open(json_data_file, "w") as f:
+            json.dump(final_data, f, indent=4)
