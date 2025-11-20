@@ -130,13 +130,6 @@ def process_data(data, endpoints_info, custom_live_categories):
 
         for live_stream in ep_data['live_streams']:
             new_cat_id = f"{ep_name}_{live_stream['category_id']}"
-            # search if thats one of our custom categories
-            for category, match_names in custom_live_categories.items():
-                if any(
-                    live_stream["name"].startswith(match_name)
-                    for match_name in match_names
-                ):
-                    new_cat_id = category
             live_stream['category_id'] = new_cat_id
             live_stream["direct_source"] = \
                 live_url(live_stream['stream_id'], endpoints_info[ep_name])
@@ -144,6 +137,19 @@ def process_data(data, endpoints_info, custom_live_categories):
             live_stream["num"] = global_live_stream_id
             global_live_stream_id += 1
             result["live_streams"].append(live_stream)
+
+            # if thats one of our custom categories, duplicate entry
+            for category, match_names in custom_live_categories.items():
+                if any(
+                    live_stream["name"].startswith(match_name)
+                    for match_name in match_names
+                ):
+                    dup_live_stream = live_stream.copy()
+                    dup_live_stream["category_id"] = category
+                    dup_live_stream["stream_id"] = global_live_stream_id
+                    dup_live_stream["num"] = global_live_stream_id
+                    global_live_stream_id += 1
+                    result["live_streams"].append(dup_live_stream)
 
         for movie_cat in ep_data['movie_categories']:
             new_cat_id = f"{ep_name}_{movie_cat['category_id']}"
@@ -264,6 +270,9 @@ if __name__ == "__main__":
     if steps_from <= 0:
         upstream_data = {}
         for ep_name, ep_info in CONFIG['endpoints'].items():
+            if not ep_info.get("enabled", True):
+                print(f"Skipping disabled endpoint: {ep_name}")
+                continue
             print(f"Processing endpoint: {ep_name}")
             # raw info from upstream endpoint
             upstream_data[ep_name] = fetch_from_endpoint(ep_info)
