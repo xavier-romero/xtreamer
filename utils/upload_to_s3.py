@@ -41,7 +41,17 @@ def get_poster_url(movie_name):
     if not data.get("results"):
         return None
 
-    poster = data["results"][0].get("poster_path")
+    poster = None
+
+    for result in data["results"]:
+        title = result.get("title", "").lower()
+        original_title = result.get("original_title", "").lower()
+        if movie_name.lower() == title or movie_name.lower() == original_title:
+            poster = result["poster_path"]
+
+    if not poster:
+        poster = data["results"][0].get("poster_path")
+    
     if not poster:
         return None
 
