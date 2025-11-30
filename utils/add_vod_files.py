@@ -1,5 +1,6 @@
 import sys
 import json
+import os
 from time import time
 
 
@@ -34,6 +35,11 @@ csv_file = CONFIG.get("s3_uploads", {}).get("csv_file", "uploads.csv")
 category_name = CONFIG.get("s3_uploads", {}).get("category", "Custom")
 print(f"Processing category: {category_name}")
 movies_added = 0
+
+if not os.path.exists(csv_file):
+    print(f"File {csv_file} not found.")
+    sys.exit(1)
+
 with open(csv_file, "r") as f:
     for line in f:
         if not line:
