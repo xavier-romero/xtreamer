@@ -40,8 +40,14 @@ def fetch_from_endpoint(endpoint_info):
     return result
 
 
-def filter_data(ep_data, whitelisted_grups=[]):
+def filter_data(ep_data, whitelisted_grups=[], custom_live_cats={}):
     result = {}
+
+    channel_starts_with = []
+    channel_has = []
+    for _, rules in custom_live_cats.items():
+        channel_starts_with.extend(rules.get("channel_startswith", []))
+        channel_has.extend(rules.get("channel_has", []))
 
     for ep_name in ep_data:
         data = ep_data[ep_name]
@@ -56,11 +62,20 @@ def filter_data(ep_data, whitelisted_grups=[]):
             )
         ]
 
+        # Here we're adding channels for selected categories, BUT also
+        # channels that match rules for custom categories, even if they're not
+        # in a selected channel
         result[ep_name]["live_streams"] = [
             stream for stream in data["live_streams"]
             if any(
                 stream["category_id"] == cat["category_id"]
                 for cat in result[ep_name]["live_categories"]
+            ) or any(
+                stream["name"].lower().startswith(match_name.lower())
+                for match_name in channel_starts_with
+            ) or any(
+                match_name.lower() in stream["name"].lower()
+                for match_name in channel_has
             )
         ]
 
@@ -130,19 +145,32 @@ def process_data(data, endpoints_info, custom_live_categories):
 
         for live_stream in ep_data['live_streams']:
             new_cat_id = f"{ep_name}_{live_stream['category_id']}"
-            live_stream['category_id'] = new_cat_id
-            live_stream["direct_source"] = \
-                live_url(live_stream['stream_id'], endpoints_info[ep_name])
-            live_stream["stream_id"] = global_live_stream_id
-            live_stream["num"] = global_live_stream_id
-            global_live_stream_id += 1
-            result["live_streams"].append(live_stream)
+            # that could be a channel that we want on a custom group but
+            #  at same time this channel could be in a group that we dont want
+            if any(
+                _category.get("category_id") == new_cat_id
+                for _category in result["live_categories"]
+            ):
+                live_stream['category_id'] = new_cat_id
+                live_stream["direct_source"] = \
+                    live_url(live_stream['stream_id'], endpoints_info[ep_name])
+                live_stream["stream_id"] = global_live_stream_id
+                live_stream["num"] = global_live_stream_id
+                global_live_stream_id += 1
+                result["live_streams"].append(live_stream)
 
             # if thats one of our custom categories, duplicate entry
-            for category, match_names in custom_live_categories.items():
+            for category, match_rules_dict in custom_live_categories.items():
+                channel_startswith = \
+                    match_rules_dict.get("channel_startswith", [])
+                channel_has = \
+                    match_rules_dict.get("channel_has", [])
                 if any(
-                    live_stream["name"].startswith(match_name)
-                    for match_name in match_names
+                    live_stream["name"].lower().startswith(match_name.lower())
+                    for match_name in channel_startswith
+                ) or any(
+                    match_name.lower() in live_stream["name"].lower()
+                    for match_name in channel_has
                 ):
                     dup_live_stream = live_stream.copy()
                     dup_live_stream["category_id"] = category
@@ -257,7 +285,7 @@ def generate_channel_logo(text, logo_url):
 if __name__ == "__main__":
 
     if len(sys.argv) < 2:
-        print("Usage: python create_data.py config.json [steps_from]")
+        print("Usage: python create_data.py config.json [step_from=0] [step_to=3]")  # noqa
         sys.exit(1)
 
     config_file = sys.argv[1]
@@ -265,9 +293,10 @@ if __name__ == "__main__":
         CONFIG = json.load(f)
 
     json_data_file = CONFIG.get('json_data_file', 'final_data.json')
-    steps_from = int(sys.argv[2]) if len(sys.argv) > 2 else 0
+    step_from = int(sys.argv[2]) if len(sys.argv) > 2 else 0
+    step_to = int(sys.argv[3]) if len(sys.argv) > 3 else 3
 
-    if steps_from <= 0:
+    if step_from <= 0 and step_to >= 0:
         upstream_data = {}
         for ep_name, ep_info in CONFIG['endpoints'].items():
             if not ep_info.get("enabled", True):
@@ -283,10 +312,11 @@ if __name__ == "__main__":
             upstream_data = json.load(f)
 
     # filtered data after applying whitelists/blacklists
-    if steps_from <= 1:
+    if step_from <= 1 and step_to >= 1:
         filtered_data = filter_data(
             upstream_data,
-            whitelisted_grups=CONFIG.get("whitelisted_grups", [])
+            whitelisted_grups=CONFIG.get("whitelisted_grups", []),
+            custom_live_cats=CONFIG.get("custom_live_categories", {})
         )
         with open("1_filtered_data.json", "w") as f:
             json.dump(filtered_data, f, indent=4)
@@ -295,7 +325,7 @@ if __name__ == "__main__":
             filtered_data = json.load(f)
 
     # processed data with direct source URLs and reordered categories
-    if steps_from <= 2:
+    if step_from <= 2 and step_to >= 2:
         processed_data = process_data(
             filtered_data, CONFIG['endpoints'],
             CONFIG.get("custom_live_categories", {})
@@ -306,7 +336,7 @@ if __name__ == "__main__":
         with open("2_processed_data.json", "r") as f:
             processed_data = json.load(f)
 
-    if steps_from <= 3:
+    if step_from <= 3 and step_to >= 3:
         # Download icons and create missing ones
         final_data = retrieve_logos(processed_data, CONFIG['base_url'])
         with open(json_data_file, "w") as f:
