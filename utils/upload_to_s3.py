@@ -51,7 +51,7 @@ def get_poster_url(movie_name):
 
     if not poster:
         poster = data["results"][0].get("poster_path")
-    
+
     if not poster:
         return None
 
