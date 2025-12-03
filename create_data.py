@@ -6,6 +6,7 @@ import json
 import sys
 
 
+# Just fetch data from endpoints, data is saved as is, no changes.
 def fetch_from_endpoint(endpoint_info):
     ep_url = \
         f"{endpoint_info['url']}/player_api.php?" \
@@ -40,6 +41,7 @@ def fetch_from_endpoint(endpoint_info):
     return result
 
 
+# Data is filtered here: the right groups and channels are selected
 def filter_data(ep_data, whitelisted_grups=[], custom_live_cats={}):
     result = {}
 
@@ -107,7 +109,7 @@ def filter_data(ep_data, whitelisted_grups=[], custom_live_cats={}):
     return result
 
 
-def process_data(data, endpoints_info, custom_live_categories):
+def process_data(data, endpoints_info, custom_live_cats={}):
     def live_url(stream_id, endpoint_info):
         return \
             f"{endpoint_info['url']}/" \
@@ -122,7 +124,7 @@ def process_data(data, endpoints_info, custom_live_categories):
     result = {
         "live_categories": [
             {"category_id": k, "category_name": k}
-            for k in custom_live_categories.keys()
+            for k in custom_live_cats.keys()
         ],
         "live_streams": [],
         "movie_categories": [],
@@ -136,11 +138,14 @@ def process_data(data, endpoints_info, custom_live_categories):
 
     # live
     for ep_name, ep_data in data.items():
+        suffix = endpoints_info[ep_name].get("suffix", "")
+
         for live_cat in ep_data['live_categories']:
             new_cat_id = f"{ep_name}_{live_cat['category_id']}"
             live_cat['category_id'] = new_cat_id
             new_parent_id = f"{ep_name}_{live_cat.get('parent_id', '')}"
             live_cat['parent_id'] = new_parent_id
+            live_cat['category_name'] += suffix
             result["live_categories"].append(live_cat)
 
         for live_stream in ep_data['live_streams']:
@@ -156,11 +161,12 @@ def process_data(data, endpoints_info, custom_live_categories):
                     live_url(live_stream['stream_id'], endpoints_info[ep_name])
                 live_stream["stream_id"] = global_live_stream_id
                 live_stream["num"] = global_live_stream_id
+                live_stream["name"] += suffix
                 global_live_stream_id += 1
                 result["live_streams"].append(live_stream)
 
             # if thats one of our custom categories, duplicate entry
-            for category, match_rules_dict in custom_live_categories.items():
+            for category, match_rules_dict in custom_live_cats.items():
                 channel_startswith = \
                     match_rules_dict.get("channel_startswith", [])
                 channel_has = \
@@ -182,6 +188,7 @@ def process_data(data, endpoints_info, custom_live_categories):
         for movie_cat in ep_data['movie_categories']:
             new_cat_id = f"{ep_name}_{movie_cat['category_id']}"
             movie_cat['category_id'] = new_cat_id
+            movie_cat['category_name'] += suffix
             result["movie_categories"].append(movie_cat)
 
         for movie_stream in ep_data['movie_streams']:
@@ -193,6 +200,7 @@ def process_data(data, endpoints_info, custom_live_categories):
                     movie_stream['stream_id'], endpoints_info[ep_name], ext)
             movie_stream["stream_id"] = global_movie_stream_id
             movie_stream["num"] = global_movie_stream_id
+            movie_stream['name'] += suffix
             global_movie_stream_id += 1
             result["movie_streams"].append(movie_stream)
 
