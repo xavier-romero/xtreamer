@@ -200,7 +200,6 @@ def process_data(data, endpoints_info, custom_live_cats={}):
                     movie_stream['stream_id'], endpoints_info[ep_name], ext)
             movie_stream["stream_id"] = global_movie_stream_id
             movie_stream["num"] = global_movie_stream_id
-            movie_stream['name'] += suffix
             global_movie_stream_id += 1
             result["movie_streams"].append(movie_stream)
 
