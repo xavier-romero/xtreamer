@@ -5,12 +5,24 @@ import os
 import re
 import json
 import sys
+import subprocess
+import logging
 
 
 CONFIG = {}
 s3 = None
 s3_presigneds = {}
 app = Flask(__name__)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+
+log = logging.getLogger(__name__)
 
 
 def check_login(user, pwd):
@@ -113,7 +125,7 @@ def player_api():
 def set_or_update_presigned_url(vod):
     key = vod["s3_hashed_name"]
     if not key:
-        print(
+        log.info(
             f"No s3_hashed_name for movie {vod['name']} with id "
             f"{vod['stream_id']}, skipping presigned URL generation."
         )
@@ -124,7 +136,7 @@ def set_or_update_presigned_url(vod):
         expires = s3_presigneds[key]['expires']
         if expires - int(time()) > 3600:  # 1h remaining
             direct_source = s3_presigneds[key]['url']
-            print(f"Using cached presigned URL for movie {vod['name']}")
+            log.info(f"Using cached presigned URL for movie {vod['name']}")
 
     if direct_source:
         vod["direct_source"] = direct_source
@@ -142,9 +154,94 @@ def set_or_update_presigned_url(vod):
         "url": direct_source,
         "expires": int(time()) + 3600*6
     }
-    print(f"Generated new presigned URL for movie {vod['name']}")
+    log.info(f"Generated new presigned URL for movie {vod['name']}")
     vod["direct_source"] = direct_source
     return
+
+
+def detect_audio_codec(url, timeout=5):
+    cmd = [
+        "ffprobe",
+        "-v", "error",
+        "-select_streams", "a:0",
+        "-show_entries", "stream=codec_name",
+        "-of", "json",
+        url
+    ]
+
+    try:
+        out = subprocess.check_output(cmd, timeout=timeout)
+        data = json.loads(out)
+        audio_codec = data["streams"][0]["codec_name"]
+        log.info(f"Audio codec: {audio_codec}")
+        return audio_codec
+    except Exception:
+        return None
+
+
+def stream_ffmpeg(cmd, content_type="video/mp4"):
+    """
+    Executa FFmpeg i fa streaming del stdout cap al client
+    """
+
+    process = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        bufsize=10**6
+    )
+
+    def generate():
+        try:
+            while True:
+                chunk = process.stdout.read(8192)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            process.kill()
+
+    return Response(
+        generate(),
+        content_type=content_type,
+        headers={
+            "Cache-Control": "no-cache",
+            "Accept-Ranges": "bytes"
+        }
+    )
+
+
+def ffmpeg_transcode_audio(src_url):
+    """
+    Vídeo copy + àudio → AAC
+    """
+    return [
+        "ffmpeg",
+        "-loglevel", "error",
+
+        # reconnect HLS
+        "-reconnect", "1",
+        "-reconnect_streamed", "1",
+        "-reconnect_delay_max", "5",
+
+        "-i", src_url,
+
+        # map explícit (1 vídeo + 1 àudio)
+        "-map", "0:v:0",
+        "-map", "0:a:0",
+
+        # vídeo intacte
+        "-c:v", "copy",
+
+        # 🔊 àudio compatible universal
+        "-c:a", "aac",
+        "-b:a", "192k",
+
+        # mp4 fragmentat
+        "-movflags", "frag_keyframe+empty_moov",
+        "-f", "mp4",
+        "pipe:1"
+    ]
 
 
 @app.route("/<username>/<password>/<int:stream_id>")
@@ -158,12 +255,33 @@ def proxy_stream(username, password, stream_id=None, extension=None):
     redirect_url = None
 
     if request.path.startswith("/movie/"):
+        audio_codec = None
+        ua_header = request.headers.get("User-Agent", "").lower()
+        range_header = request.headers.get("Range")
+        log.info(f"MOVIE. User agent: {ua_header}, Range: {range_header}")
+
         for movie in CONFIG['movie_streams']:
             if movie['stream_id'] == stream_id:
                 if movie.get("s3_hashed_name"):
                     set_or_update_presigned_url(movie)
                 redirect_url = movie['direct_source']
+                if not range_header:
+                    audio_codec = detect_audio_codec(redirect_url)
                 break
+
+        transcode = (
+            redirect_url and
+            (not range_header) and
+            audio_codec in ("eac3", ) and
+            not any(x in ua_header.lower() for x in ("mozilla", "vlc"))
+        )
+
+        if transcode:
+            log.info(f"Transcoding from url: {redirect_url}")
+            return stream_ffmpeg(
+                ffmpeg_transcode_audio(redirect_url),
+                content_type="video/mp4"
+            )
 
     if (
         request.path.startswith("/live/") or
@@ -200,7 +318,7 @@ def logos(filename):
 def load_stream_data():
     json_data_file = CONFIG.get('json_data_file', 'final_data.json')
     if not json_data_file or not os.path.exists(json_data_file):
-        print("No existing stream data file found: ", json_data_file)
+        log.info("No existing stream data file found: ", json_data_file)
         sys.exit(1)
 
     with open(json_data_file) as f:
@@ -219,14 +337,14 @@ if __name__ == "__main__":
         CONFIG = json.load(f)
 
     if not CONFIG:
-        print("Error: config.json is empty or invalid!")
+        log.info("Error: config.json is empty or invalid!")
         exit(1)
 
     if CONFIG["credentials"] == [] or any(
         cred["username"] == "" or cred["password"] == ""
         for cred in CONFIG["credentials"]
     ):
-        print("Error: No credentials set in config.json!")
+        log.info("Error: No credentials set in config.json!")
         exit(1)
 
     s3 = boto3.client(
