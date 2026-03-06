@@ -7,6 +7,7 @@ import json
 import sys
 import subprocess
 import logging
+import requests
 
 
 CONFIG = {}
@@ -244,61 +245,113 @@ def ffmpeg_transcode_audio(src_url):
     ]
 
 
-@app.route("/<username>/<password>/<int:stream_id>")
-@app.route("/live/<username>/<password>/<int:stream_id>.ts")
+def stream_remote(url):
+    r = requests.get(url, stream=True)
+
+    log.info(f"Streaming remote from: {url}")
+
+    def generate():
+        chunks_streamed = 0
+        chunk_size = 256*1024  # 256KB
+        try:
+            for chunk in r.iter_content(chunk_size=chunk_size):
+                if chunk:
+                    chunks_streamed += 1
+                    if chunks_streamed % 40 == 0:
+                        log.info(f"Streamed {chunks_streamed} chunks ({chunks_streamed * chunk_size / 1024 / 1024:.2f} MB) from {url}")  # noqa
+                    yield chunk
+        finally:
+            r.close()
+
+    return Response(
+        generate(),
+        content_type=r.headers.get("Content-Type", "video/mp2t"),
+        headers={
+            "Cache-Control": "no-cache",
+            "Transfer-Encoding": "chunked"
+        }
+    )
+
+
 @app.route("/movie/<username>/<password>/<int:stream_id>.<extension>")
 @app.route("/movie/<username>/<password>/<int:stream_id>")
-def proxy_stream(username, password, stream_id=None, extension=None):
+def proxy_movie(username, password, stream_id=None, extension=None):
     if not check_login(username, password):
         return "Unauthorized", 401
 
+    log.info(f"Requested movie: {stream_id}, extension: {extension}")
+
     redirect_url = None
+    audio_codec = None
+    ua_header = request.headers.get("User-Agent", "").lower()
+    range_header = request.headers.get("Range")
+    log.info(f"MOVIE. User agent: {ua_header}, Range: {range_header}")
 
-    if request.path.startswith("/movie/"):
-        audio_codec = None
-        ua_header = request.headers.get("User-Agent", "").lower()
-        range_header = request.headers.get("Range")
-        log.info(f"MOVIE. User agent: {ua_header}, Range: {range_header}")
-
-        for movie in CONFIG['movie_streams']:
-            if movie['stream_id'] == stream_id:
-                if movie.get("s3_hashed_name"):
-                    set_or_update_presigned_url(movie)
-                redirect_url = movie['direct_source']
-                if not range_header:
-                    audio_codec = detect_audio_codec(redirect_url)
-                break
-
-        transcode = (
-            redirect_url and
-            (not range_header) and
-            audio_codec in ("eac3", ) and
-            not any(x in ua_header.lower() for x in ("mozilla", "vlc"))
-        )
-
-        if transcode:
-            log.info(f"Transcoding from url: {redirect_url}")
-            return stream_ffmpeg(
-                ffmpeg_transcode_audio(redirect_url),
-                content_type="video/mp4"
-            )
-
-    if (
-        request.path.startswith("/live/") or
-        request.path.startswith(f"/{username}/")
-    ):
-        for live in CONFIG['live_streams']:
-            if live['stream_id'] == stream_id:
-                redirect_url = live['direct_source']
-                break
+    for movie in CONFIG['movie_streams']:
+        if movie['stream_id'] == stream_id:
+            if movie.get("s3_hashed_name"):
+                set_or_update_presigned_url(movie)
+            redirect_url = movie['direct_source']
+            if not range_header:
+                audio_codec = detect_audio_codec(redirect_url)
+            break
 
     if not redirect_url:
         return "Stream not found", 404
 
-    return Response(
-        f"Redirecting to {redirect_url}", status=302,
-        headers={"Location": redirect_url}
+    transcode = (
+        (not range_header) and
+        audio_codec in ("eac3", ) and
+        not any(x in ua_header.lower() for x in ("mozilla", "vlc"))
     )
+
+    if transcode:
+        log.info(f"Transcoding from url: {redirect_url}")
+        return stream_ffmpeg(
+            ffmpeg_transcode_audio(redirect_url),
+            content_type="video/mp4"
+        )
+    else:
+        return Response(
+            f"Redirecting to {redirect_url}", status=302,
+            headers={"Location": redirect_url}
+        )
+
+
+@app.route("/<username>/<password>/<int:stream_id>")
+@app.route("/live/<username>/<password>/<int:stream_id>.ts")
+def proxy_live(username, password, stream_id=None):
+    if not check_login(username, password):
+        return "Unauthorized", 401
+
+    log.info(f"Requested live stream: {stream_id}")
+
+    redirect_url = None
+    category_id = None
+
+    for live in CONFIG['live_streams']:
+        if live['stream_id'] == stream_id:
+            redirect_url = live['direct_source']
+            name = live.get('name')
+            break
+
+    if not redirect_url:
+        return "Stream not found", 404
+
+    category_ids = [
+        live.get('category_id')
+        for live in CONFIG['live_streams'] if live.get('name') == name
+    ]
+
+    if any(c in CONFIG.get("proxy_categories", []) for c in category_ids if c):
+        log.info(f"Proxying live stream {stream_id} in category {category_id}")
+        return stream_remote(redirect_url)
+    else:
+        log.info(f"Sending redirect URL {redirect_url} for live stream {stream_id} in category {category_id}")
+        return Response(
+            f"Redirecting to {redirect_url}", status=302,
+            headers={"Location": redirect_url}
+        )
 
 
 @app.route("/xmltv.php")

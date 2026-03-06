@@ -53,6 +53,9 @@ with open(csv_file, "r") as f:
             print(f"Switching to category: {category_name}")
             continue
 
+        if not line.strip():
+            continue
+
         fields = line.strip().split(',')
 
         movie_name = fields[0]
