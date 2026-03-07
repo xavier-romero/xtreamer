@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import json
 import boto3
@@ -104,7 +105,8 @@ def main():
         upload_to_s3(path, hashed)
 
         # Fetch poster
-        poster_url = get_poster_url(movie_name)
+        poster_url = get_poster_url(movie_name) or \
+            get_poster_url(re.sub(r'^\(?\d{4}\)?\s*', '', movie_name))
 
         # Movie name will be store on a CSV file, so remove commas
         movie_name = movie_name.replace(",", "")
