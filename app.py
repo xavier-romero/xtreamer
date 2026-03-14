@@ -333,6 +333,7 @@ def proxy_live(username, password, stream_id=None):
         if live['stream_id'] == stream_id:
             redirect_url = live['direct_source']
             name = live.get('name')
+            category_id = live.get('category_id')
             break
 
     if not redirect_url:
