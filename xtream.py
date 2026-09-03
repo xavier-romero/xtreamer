@@ -4,9 +4,9 @@ import logging
 import subprocess
 import requests
 import threading
+from collections import deque
 from flask import Response
 from time import sleep
-from queue import Queue, Full
 
 
 logging.basicConfig(
@@ -19,8 +19,9 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 
-q = Queue(maxsize=100)
-
+# MPEG-TS packet size. Chunks are published as whole packets so a viewer that
+# snaps forward to the live edge always lands on a packet boundary.
+TS_PACKET = 188
 
 
 def detect_audio_codec(url, timeout=5):
@@ -108,178 +109,178 @@ def ffmpeg_transcode_audio(src_url):
     ]
 
 
+class _Session():
+    """
+    One upstream connection, shared by every viewer currently watching.
+
+    Chunks land in a single ring buffer tagged with a sequence number; viewers
+    hold nothing but a cursor into it. Nobody gets a private copy of the data,
+    so a slow viewer can never build up a backlog of its own: it just falls
+    behind in the ring and gets snapped back to the live edge.
+    """
+
+    def __init__(self, url, chunk_size, ring_len):
+        self.url = url
+        self.chunk_size = chunk_size
+        self.buf = deque(maxlen=ring_len)   # (seq, chunk)
+        self.head = 0                       # seq the next chunk will get
+        self.cv = threading.Condition()
+        self.viewers = 0
+        self.stopped = False
+        self.thread = None
+        self._pending = b""
+
+    def publish(self, chunk):
+        data = self._pending + chunk if self._pending else chunk
+        cut = len(data) - (len(data) % TS_PACKET)
+        if not cut:
+            self._pending = data
+            return
+
+        self._pending = data[cut:]
+        with self.cv:
+            self.buf.append((self.head, data[:cut]))
+            self.head += 1
+            self.cv.notify_all()
+
+    def fetch(self):
+        chunks = 0
+
+        while not self.stopped:
+            r = None
+            # A new connection restarts at a packet boundary, so anything left
+            # over from the previous one would misalign the stream.
+            self._pending = b""
+            try:
+                log.info(f"Connecting to upstream {self.url}")
+                r = requests.get(self.url, stream=True, timeout=(5, 15))
+                for chunk in r.iter_content(chunk_size=self.chunk_size):
+                    if self.stopped:
+                        break
+                    if not chunk:
+                        continue
+                    chunks += 1
+                    if chunks % 500 == 0:
+                        log.info(
+                            f"Fetched {chunks} chunks "
+                            f"({chunks * self.chunk_size / 1024 / 1024:.2f} MB) "
+                            f"| Viewers: {self.viewers}"
+                        )
+                    self.publish(chunk)
+                log.info("Upstream returned no more data")
+            except Exception as e:
+                log.warning(f"Fetcher error: {e}")
+            finally:
+                if r is not None:
+                    r.close()
+
+            if not self.stopped:
+                sleep(1)  # backoff before reconnecting
+
+        # Wake up anyone still waiting on us so they can close their response
+        with self.cv:
+            self.cv.notify_all()
+        log.info(f"Fetcher thread for {self.url} finished")
+
+
 class RemoteStreamer():
-    consumer_count = 0
-    consumer_queues = []
-    url = None
-    thread = None
+    chunk_size = 64*1024   # 64KB, a whole number of TS packets after publish()
+    ring_len = 256         # ~16MB of recent stream kept for late/lagging viewers
+    lead = 8               # every viewer rides this far behind the live edge
+    max_lag = 64           # further behind than this and we snap forward
+    stall_timeout = 20     # give up on a viewer if upstream is silent this long
 
-    chunk_size = 256*1024  # 256KB
-    queue_size = 50
-
+    _lock = threading.Lock()
+    _session = None
 
     def __init__(self, url):
-        log.info(f"RemoteStreamer({url}): Consumers: {RemoteStreamer.consumer_count}, URL: {RemoteStreamer.url}")
-        RemoteStreamer.consumer_count += 1
-        self.q = Queue(maxsize=self.queue_size)
+        with RemoteStreamer._lock:
+            session = RemoteStreamer._session
 
-        if RemoteStreamer.consumer_count == 1:
-            log.info(f"Launching retriever thread for {url}")
-            RemoteStreamer.url = url
-            RemoteStreamer.thread = threading.Thread(target=self._retrieve_remote, daemon=True, name=f"Fetcher-{url[-20:]}")
-            RemoteStreamer.thread.start()
-        else:
-            log.info(f"Consuming from existging thread for {RemoteStreamer.url}")
+            # Deliberate: a second viewer joins whatever is already being
+            # fetched, it does not open a second upstream connection.
+            if session is None or session.stopped:
+                session = _Session(url, self.chunk_size, self.ring_len)
+                session.thread = threading.Thread(
+                    target=session.fetch, daemon=True,
+                    name=f"Fetcher-{url[-20:]}"
+                )
+                RemoteStreamer._session = session
+                session.viewers += 1
+                session.thread.start()
+                log.info(f"RemoteStreamer({url}): launched new fetcher")
+            else:
+                session.viewers += 1
+                log.info(
+                    f"RemoteStreamer({url}): joining existing fetcher for "
+                    f"{session.url}, now {session.viewers} viewers"
+                )
 
-        # We do that last thing to avoid diff in delays
-        RemoteStreamer.consumer_queues.append(self.q)
+            self.session = session
 
+    def _release(self):
+        session = self.session
+        with RemoteStreamer._lock:
+            session.viewers -= 1
+            remaining = session.viewers
+            if remaining <= 0:
+                # Detach the session before the fetcher has actually noticed:
+                # the next viewer builds a fresh one instead of racing this
+                # thread, and this thread exits at its next chunk or timeout.
+                session.stopped = True
+                if RemoteStreamer._session is session:
+                    RemoteStreamer._session = None
+
+        log.info(f"Viewer left, {max(remaining, 0)} remaining")
 
     def stream(self):
-        # Wait until the queue is at least half full before starting to stream, to avoid too much buffering on the client side
-        buffer_attempts = 30
-        while(self.q.qsize() < self.queue_size // 3) and buffer_attempts > 0:
-            log.info(f"Buffering... {self.q.qsize()}/{self.queue_size} chunks in queue")
-            buffer_attempts -= 1
-            sleep(1)
+        session = self.session
 
-        if buffer_attempts <= 0:
-            log.warning("Buffering timeout reached, aborting!")
-            RemoteStreamer.consumer_count -= 1
-            log.info(f"Current consumer count: {RemoteStreamer.consumer_count}")
-            if self.q in RemoteStreamer.consumer_queues:
-                RemoteStreamer.consumer_queues.remove(self.q)
-            return None
+        with session.cv:
+            cursor = max(session.head - self.lead, 0)
+        log.info(f"Viewer starting at seq {cursor}, live edge {session.head}")
 
-        log.info("Starting RemoteStreamer.stream() loop")
-        chunks_streamed = 0
-        my_index = RemoteStreamer.consumer_count
+        served = 0
         try:
             while True:
-                if self.q in RemoteStreamer.consumer_queues:
-                    chunk = self.q.get()
-                    if not chunk:
-                        log.info("No chunk received, exiting stream loop")
-                        break
-                    chunks_streamed += 1
-                    if chunks_streamed % 100 == 0:
+                with session.cv:
+                    while not session.stopped and (
+                        not session.buf or session.buf[-1][0] < cursor
+                    ):
+                        if not session.cv.wait(timeout=self.stall_timeout):
+                            log.warning("Upstream stalled, closing viewer")
+                            return
+                    if session.stopped:
+                        log.info("Session stopped, closing viewer")
+                        return
+
+                    oldest = session.buf[0][0]
+                    newest = session.buf[-1][0]
+
+                    # Too far behind (or fallen off the back of the ring):
+                    # skip the backlog instead of delivering stale video. This
+                    # is what keeps every viewer on the same picture.
+                    if cursor < oldest or newest - cursor > self.max_lag:
+                        cursor = max(newest - self.lead, oldest)
                         log.info(
-                            f"Streamed {chunks_streamed} chunks ({chunks_streamed * self.chunk_size / 1024 / 1024:.2f} MB) | "
-                            f"Consumers index: {my_index}"
+                            f"Viewer resync to seq {cursor}, live edge {newest}"
+                        )
+
+                    out = [
+                        chunk for seq, chunk in session.buf if seq >= cursor
+                    ]
+                    cursor = newest + 1
+
+                # Socket writes happen outside the lock: a slow viewer must
+                # never be able to stall the fetcher or the other viewers.
+                for chunk in out:
+                    served += 1
+                    if served % 500 == 0:
+                        log.info(
+                            f"Streamed {served} chunks "
+                            f"({served * self.chunk_size / 1024 / 1024:.2f} MB)"
                         )
                     yield chunk
-                else:
-                    log.warning("Queue not longer on consumer list, exiting")
-                    break
         finally:
             log.info("Stopping RemoteStreamer.stream() loop")
-            RemoteStreamer.consumer_count -= 1
-            log.info(f"Current consumer count: {RemoteStreamer.consumer_count}")
-            if self.q in RemoteStreamer.consumer_queues:
-                RemoteStreamer.consumer_queues.remove(self.q)
-
-
-    def _retrieve_remote(self):
-        chunks_fetched = 0
-
-        while RemoteStreamer.consumer_count > 0:
-            log.info(f"Main retriever loop started. Consumer count: {RemoteStreamer.consumer_count}")
-            try:
-                r = requests.get(RemoteStreamer.url, stream=True)
-                for chunk in r.iter_content(chunk_size=self.chunk_size):
-                    if chunk:
-                        chunks_fetched += 1
-                        if chunks_fetched % 100 == 0:
-                            log.info(
-                                f"Fetched {chunks_fetched} chunks ({chunks_fetched * self.chunk_size / 1024 / 1024:.2f} MB) from {RemoteStreamer.url} | "
-                                f"Consumers: {RemoteStreamer.consumer_count}, Queues: {len(RemoteStreamer.consumer_queues)}"
-                            )
-                        for q in RemoteStreamer.consumer_queues:
-                            try:
-                                q.put_nowait(chunk)
-                            except Full:
-                                log.warning(f"Queue full, removing from list.")
-                                if q in RemoteStreamer.consumer_queues:
-                                    RemoteStreamer.consumer_queues.remove(q)
-                    else:
-                        log.error("No chunk received!")
-                    
-                    if RemoteStreamer.consumer_count <= 0:
-                        log.warning("No consumers left!")
-                        break
-                log.info("Finished fetching remote stream: no more chunks returned from stream!")
-            except Exception as e:
-                log.info(f"Retriever thread got exception: {e}")
-            finally:
-                if r:
-                    r.close()
-                log.info("Shutting down fetcher thread")
-
-
-
-# def stream_remote(url):
-#     r = requests.get(url, stream=True)
-
-#     def generate():
-#         global streaming, consuming, q, chunk_size
-
-#         chunks_streamed = 0
-#         streaming = True
-#         try:
-#             for chunk in r.iter_content(chunk_size=chunk_size):
-#                 if chunk:
-#                     chunks_streamed += 1
-#                     if chunks_streamed % 100 == 0:
-#                         log.info(f"Streamed {chunks_streamed} chunks ({chunks_streamed * chunk_size / 1024 / 1024:.2f} MB) from {url}")  # noqa
-#                     if consuming:
-#                         try:
-#                             q.put_nowait(chunk)
-#                         except Full:
-#                             log.warning(f"Queue full, dropping chunk for {url}")
-#                     yield chunk
-#         finally:
-#             streaming = False
-#             r.close()
-#             log.info(f"Generate streaming end for: {url}")
-
-#     def consume():
-#         global streaming, consuming, q, chunk_size
-
-#         if not streaming:
-#             log.info(f"ERRPR: Consumer detected no active stream!")
-#             return
-
-#         chunks_consumed = 0
-#         consuming = True
-#         sleep(3)
-#         try:
-#             while True:
-#                 chunk = q.get()
-#                 chunks_consumed += 1
-#                 if chunks_consumed % 100 == 0:
-#                     log.info(f"Consumed {chunks_consumed} chunks ({chunks_consumed * chunk_size / 1024 / 1024:.2f} MB) from {url}")  # noqa
-#                 yield chunk
-#         finally:
-#             log.info(f"Consume streaming end for: {url}")
-#             consuming = False
-
-#     if not streaming:
-#         log.info(f"Generate streaming remote from: {url}")
-#         return Response(
-#             generate(),
-#             content_type=r.headers.get("Content-Type", "video/mp2t"),
-#             headers={
-#                 "Cache-Control": "no-cache",
-#                 "Transfer-Encoding": "chunked"
-#             }
-#         )
-#     else:
-#         log.info(f"Consume streaming remote from: {url}")
-#         return Response(
-#             consume(),
-#             content_type=r.headers.get("Content-Type", "video/mp2t"),
-#             headers={
-#                 "Cache-Control": "no-cache",
-#                 "Transfer-Encoding": "chunked"
-#             }
-#         )
+            self._release()

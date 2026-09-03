@@ -235,10 +235,7 @@ def proxy_live(username, password, stream_id=None):
         return Response(
             rs.stream(),
             content_type="video/mp2t",
-            headers={
-                "Cache-Control": "no-cache",
-                "Transfer-Encoding": "chunked"
-            }
+            headers={"Cache-Control": "no-cache"}
         )
     else:
         log.info(f"Sending redirect URL {redirect_url} for live stream {stream_id} in category {category_id}")
