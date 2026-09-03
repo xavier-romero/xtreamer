@@ -185,10 +185,17 @@ class _Session():
 
 class RemoteStreamer():
     chunk_size = 64*1024   # 64KB, a whole number of TS packets after publish()
-    ring_len = 256         # ~16MB of recent stream kept for late/lagging viewers
-    lead = 8               # every viewer rides this far behind the live edge
-    max_lag = 64           # further behind than this and we snap forward
+    ring_len = 512         # ~32MB of recent stream (~40s of a 6Mbps channel)
+    lead = 40              # join/resync this far behind live (~3s of cushion)
     stall_timeout = 20     # give up on a viewer if upstream is silent this long
+
+    # Players do not read continuously: they fill their own buffer, stop
+    # reading for several seconds, then take another burst. That backpressure
+    # is normal and must NOT be treated as lag, because skipping forward
+    # discards packets the player never received and leaves a hole in the TS.
+    # The only thing that genuinely forces a skip is a backlog about to be
+    # overwritten in the ring, so the threshold belongs to the ring size.
+    max_lag = ring_len - 64
 
     _lock = threading.Lock()
     _session = None
@@ -261,9 +268,11 @@ class RemoteStreamer():
                     # skip the backlog instead of delivering stale video. This
                     # is what keeps every viewer on the same picture.
                     if cursor < oldest or newest - cursor > self.max_lag:
+                        dropped = max(newest - self.lead, oldest) - cursor
                         cursor = max(newest - self.lead, oldest)
-                        log.info(
+                        log.warning(
                             f"Viewer resync to seq {cursor}, live edge {newest}"
+                            f" (dropped {dropped} chunks)"
                         )
 
                     out = [
