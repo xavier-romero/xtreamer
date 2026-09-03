@@ -214,13 +214,15 @@ class RemoteStreamer():
                 )
                 RemoteStreamer._session = session
                 session.viewers += 1
+                self.viewer_id = session.viewers  # for logging only
                 session.thread.start()
-                log.info(f"RemoteStreamer({url}): launched new fetcher")
+                log.info(f"RemoteStreamer({url}): launched new fetcher | viewer_id={self.viewer_id}")
             else:
                 session.viewers += 1
+                self.viewer_id = session.viewers  # for logging only
                 log.info(
                     f"RemoteStreamer({url}): joining existing fetcher for "
-                    f"{session.url}, now {session.viewers} viewers"
+                    f"{session.url}, now {session.viewers} viewers | viewer_id={self.viewer_id}"
                 )
 
             self.session = session
@@ -238,14 +240,14 @@ class RemoteStreamer():
                 if RemoteStreamer._session is session:
                     RemoteStreamer._session = None
 
-        log.info(f"Viewer left, {max(remaining, 0)} remaining")
+        log.info(f"Viewer {self.viewer_id} left, {max(remaining, 0)} remaining")
 
     def stream(self):
         session = self.session
 
         with session.cv:
             cursor = max(session.head - self.lead, 0)
-        log.info(f"Viewer starting at seq {cursor}, live edge {session.head}")
+        log.info(f"Viewer {self.viewer_id} starting at seq {cursor}, live edge {session.head}")
 
         served = 0
         try:
@@ -255,10 +257,10 @@ class RemoteStreamer():
                         not session.buf or session.buf[-1][0] < cursor
                     ):
                         if not session.cv.wait(timeout=self.stall_timeout):
-                            log.warning("Upstream stalled, closing viewer")
+                            log.warning(f"Upstream stalled, closing viewer {self.viewer_id}")
                             return
                     if session.stopped:
-                        log.info("Session stopped, closing viewer")
+                        log.info(f"Session stopped, closing viewer {self.viewer_id}")
                         return
 
                     oldest = session.buf[0][0]
@@ -271,7 +273,7 @@ class RemoteStreamer():
                         dropped = max(newest - self.lead, oldest) - cursor
                         cursor = max(newest - self.lead, oldest)
                         log.warning(
-                            f"Viewer resync to seq {cursor}, live edge {newest}"
+                            f"Viewer {self.viewer_id} resync to seq {cursor}, live edge {newest}"
                             f" (dropped {dropped} chunks)"
                         )
 
@@ -286,10 +288,10 @@ class RemoteStreamer():
                     served += 1
                     if served % 500 == 0:
                         log.info(
-                            f"Streamed {served} chunks "
+                            f"Viewer {self.viewer_id} streamed {served} chunks "
                             f"({served * self.chunk_size / 1024 / 1024:.2f} MB)"
                         )
                     yield chunk
         finally:
-            log.info("Stopping RemoteStreamer.stream() loop")
+            log.info(f"Viewer {self.viewer_id} stopping RemoteStreamer.stream() loop")
             self._release()
