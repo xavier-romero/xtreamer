@@ -5,9 +5,8 @@ import os
 import re
 import json
 import sys
-import subprocess
 import logging
-import requests
+from xtream import detect_audio_codec, stream_ffmpeg, ffmpeg_transcode_audio, RemoteStreamer
 
 
 CONFIG = {}
@@ -22,7 +21,6 @@ logging.basicConfig(
         logging.StreamHandler(sys.stdout)
     ]
 )
-
 log = logging.getLogger(__name__)
 
 
@@ -160,119 +158,6 @@ def set_or_update_presigned_url(vod):
     return
 
 
-def detect_audio_codec(url, timeout=5):
-    cmd = [
-        "ffprobe",
-        "-v", "error",
-        "-select_streams", "a:0",
-        "-show_entries", "stream=codec_name",
-        "-of", "json",
-        url
-    ]
-
-    try:
-        out = subprocess.check_output(cmd, timeout=timeout)
-        data = json.loads(out)
-        audio_codec = data["streams"][0]["codec_name"]
-        log.info(f"Audio codec: {audio_codec}")
-        return audio_codec
-    except Exception:
-        return None
-
-
-def stream_ffmpeg(cmd, content_type="video/mp4"):
-    """
-    Executa FFmpeg i fa streaming del stdout cap al client
-    """
-
-    process = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        bufsize=10**6
-    )
-
-    def generate():
-        try:
-            while True:
-                chunk = process.stdout.read(8192)
-                if not chunk:
-                    break
-                yield chunk
-        finally:
-            process.kill()
-
-    return Response(
-        generate(),
-        content_type=content_type,
-        headers={
-            "Cache-Control": "no-cache",
-            "Accept-Ranges": "bytes"
-        }
-    )
-
-
-def ffmpeg_transcode_audio(src_url):
-    """
-    Vídeo copy + àudio → AAC
-    """
-    return [
-        "ffmpeg",
-        "-loglevel", "error",
-
-        # reconnect HLS
-        "-reconnect", "1",
-        "-reconnect_streamed", "1",
-        "-reconnect_delay_max", "5",
-
-        "-i", src_url,
-
-        # map explícit (1 vídeo + 1 àudio)
-        "-map", "0:v:0",
-        "-map", "0:a:0",
-
-        # vídeo intacte
-        "-c:v", "copy",
-
-        # 🔊 àudio compatible universal
-        "-c:a", "aac",
-        "-b:a", "192k",
-
-        # mp4 fragmentat
-        "-movflags", "frag_keyframe+empty_moov",
-        "-f", "mp4",
-        "pipe:1"
-    ]
-
-
-def stream_remote(url):
-    r = requests.get(url, stream=True)
-
-    log.info(f"Streaming remote from: {url}")
-
-    def generate():
-        chunks_streamed = 0
-        chunk_size = 256*1024  # 256KB
-        try:
-            for chunk in r.iter_content(chunk_size=chunk_size):
-                if chunk:
-                    chunks_streamed += 1
-                    if chunks_streamed % 40 == 0:
-                        log.info(f"Streamed {chunks_streamed} chunks ({chunks_streamed * chunk_size / 1024 / 1024:.2f} MB) from {url}")  # noqa
-                    yield chunk
-        finally:
-            r.close()
-
-    return Response(
-        generate(),
-        content_type=r.headers.get("Content-Type", "video/mp2t"),
-        headers={
-            "Cache-Control": "no-cache",
-            "Transfer-Encoding": "chunked"
-        }
-    )
-
-
 @app.route("/movie/<username>/<password>/<int:stream_id>.<extension>")
 @app.route("/movie/<username>/<password>/<int:stream_id>")
 def proxy_movie(username, password, stream_id=None, extension=None):
@@ -346,7 +231,15 @@ def proxy_live(username, password, stream_id=None):
 
     if any(c in CONFIG.get("proxy_categories", []) for c in category_ids if c):
         log.info(f"Proxying live stream {stream_id} in category {category_id}")
-        return stream_remote(redirect_url)
+        rs = RemoteStreamer(redirect_url)
+        return Response(
+            rs.stream(),
+            content_type="video/mp2t",
+            headers={
+                "Cache-Control": "no-cache",
+                "Transfer-Encoding": "chunked"
+            }
+        )
     else:
         log.info(f"Sending redirect URL {redirect_url} for live stream {stream_id} in category {category_id}")
         return Response(
@@ -413,4 +306,4 @@ if __name__ == "__main__":
     port = \
         int(CONFIG['base_url'].split(":")[-1]) \
         if ":" in CONFIG['base_url'] else 8080
-    app.run(host="0.0.0.0", port=port, debug=False)
+    app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
